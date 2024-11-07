@@ -10,9 +10,10 @@ A docker image is available to ease the code running. To simulate, run
 ./docker_run.sh
 ```
 ```bash
-# Compile the workspace
-cd /catkin_ws && catkin build
+# Compile and source the workspace
+cd /catkin_ws && catkin build && source devel/setup.bash
 ```
+
 ```bash
 # Open multiple terminals and start the simulation
 tmuxp load launch.yml
