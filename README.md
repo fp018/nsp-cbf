@@ -19,7 +19,7 @@ cd /catkin_ws && catkin build && source devel/setup.bash
 tmuxp load launch.yml
 ```
 
-**Unpause** the Gazebo simulation. Enter int the terminal numbers beetween 1 and 4 to transition beetween the stack of tacks.
+**Unpause** the Gazebo simulation. Enter in the *lower-left* terminal numbers beetween 1 and 4 to transition beetween the stack of tacks.
 
 
 To exit from the terminal multiplexer
