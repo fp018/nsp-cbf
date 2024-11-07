@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- <node name="iiwa_qp_controller" pkg="iiwa_qp" type="iiwa_qp_controller" /> -->
+    <include file="$(find kuka_iiwa_support)/launch/gazebo_vel_ctrl.launch"> </include>
+
+    <rosparam file="$(find iiwa_qp)/conf/set_qp.yaml" command="load"/>
+
+</launch>

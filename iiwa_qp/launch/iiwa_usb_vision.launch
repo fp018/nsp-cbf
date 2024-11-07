@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<launch>
+    <node name="rosToFriTau" pkg="ros_fri_interface" type="rosToFriTau" />
+    <param name="robot_description" command="$(find xacro)/xacro '$(find kuka_iiwa_support)/urdf/kuka_iiwa_vel_ctrl.xacro'" />
+    <rosparam file="$(find iiwa_qp)/conf/set_qp.yaml" command="load"/>
+    <node name="iiwa_control" pkg="iiwa_qp" type="iiwa_control" />
+    <include file="$(find usb_cam)/launch/usb_cam-test.launch"> </include>
+    <node name="vispcam" pkg="visp_ros" type="vispcam"/>
+</launch>

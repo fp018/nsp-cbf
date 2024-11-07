@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<launch>
+    <include file="$(find kuka_iiwa_support)/launch/gazebo_ctrl_camera.launch"> </include>
+
+    <rosparam file="$(find iiwa_qp)/conf/set_qp.yaml" command="load"/>
+
+  <!--  <node name="iiwa_qp_controller" pkg="iiwa_qp" type="iiwa_qp_controller" /> -->
+
+</launch>

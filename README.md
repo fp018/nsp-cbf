@@ -17,6 +17,10 @@ cd /catkin_ws && catkin build
 # Open multiple terminals and start the simulation
 tmuxp load launch.yml
 ```
+
+**Unpause** the Gazebo simulation. Enter int the terminal numbers beetween 1 and 4 to transition beetween the stack of tacks.
+
+
 To exit from the terminal multiplexer
 ```bash
 # In one terminal
