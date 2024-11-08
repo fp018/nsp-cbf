@@ -1,5 +1,5 @@
 # nsp-cbf
-This repository contains the code for the **Gazebo-ROS-Noetic** simulation of an **LBR iiwa** manipulator and the execution of a time-varying prioritized stack of tasks. The QP problem is solved with the library *osqp* [1], while the Aruco detection uses *visp* [2].
+This repository contains the code for the **Gazebo-ROS-Noetic** simulation of an **LBR iiwa** manipulator, enabling the execution of various prioritized task stacks with transitions based on user input. The QP problem is solved with the library *osqp* [1], while the Aruco detection uses *visp* [2].
 
 # To Simulate
 
@@ -19,7 +19,7 @@ cd /catkin_ws && catkin build && source devel/setup.bash
 tmuxp load launch.yml
 ```
 
-**Unpause** the Gazebo simulation. Enter in the *lower-left* terminal numbers beetween 1 and 4 to transition beetween the stack of tacks.
+**Unpause** the Gazebo simulation. Enter in the *lower-left* terminal numbers between 1 and 4 to transition between the stack of tacks.
 
 
 To exit from the terminal multiplexer
