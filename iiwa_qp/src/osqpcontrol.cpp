@@ -26,15 +26,18 @@
 #include <iiwa_qp/lbr_iiwa_7_robot.h>
 #include <vector>
 #include <cstdlib>
-
+#include <numeric>
+#include <fstream> 
+ #include <iomanip>
 #include "qp_utils.hpp"
 
 
 #define STACK 1
 #define DQPINTRP 1
 //#define NOINTERP 1
+#define SOL_TIME_EVAL 1
 
-#define dt 0.003
+#define dt 0.001
 
 using namespace std;
 class KUKA_CONTROL {
@@ -126,6 +129,8 @@ class KUKA_CONTROL {
 		ros::Time _latest_tag;
 
 		double _kp;
+		std::vector<double> _tsol;
+		std::ofstream _outFile;
 
 };
 
@@ -150,7 +155,7 @@ KUKA_CONTROL::KUKA_CONTROL() {
 	
 	_q_in = new KDL::JntArray(_Nj);
 	_dq_in = new KDL::JntArray(_Nj);
-  _q_3in = new KDL::JntArray(3);
+  	_q_3in = new KDL::JntArray(3);
 	_dq_3in = new KDL::JntArray(3);
 
 	_fksolver = new KDL::ChainFkSolverPos_recursive( _k_chain );
@@ -165,6 +170,9 @@ KUKA_CONTROL::KUKA_CONTROL() {
 	_sync = false;
 	_got_tag = false;
 	_taskSet = 0;
+
+
+	_outFile.open("qp_time.csv");
 }
 
 bool KUKA_CONTROL::init_model(){
@@ -361,7 +369,7 @@ cbf KUKA_CONTROL::cbf_vision(){
 		tf::quaternionEigenToKDL(cam_quat_object.normalized(), cam_T_object.M);
 
 	}else{
-		cam_T_object.p = T_cam.M.Inverse()*(KDL::Vector(1,0,0.0) - T_cam.p);   //cam_p_object = T_cam.M.transpose()*(p_object - p_cam);
+		cam_T_object.p = T_cam.M.Inverse()*(KDL::Vector(2, 0.5, 0.0) - T_cam.p);   //cam_p_object = T_cam.M.transpose()*(p_object - p_cam);
 	}
 	
 
@@ -388,7 +396,7 @@ void KUKA_CONTROL::cbf_joint_limits(vector<cbf> &cbfjl){
 
 	cbfjl.resize(_Nj);
 
-	int gamma = 50;
+	int gamma = 4;
 
 	for(int i=0; i<_Nj; i++){
 		cbfjl[i].dhdq.resize(_Nj);
@@ -408,12 +416,16 @@ void KUKA_CONTROL::task_set_input(){
 
 void KUKA_CONTROL::solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, int taskset, Vector7d& u){
 	
+	double sec;
+	double sec2;
+	sec = ros::WallTime::now().toNSec();
+
 	if(!updateQP(solver, cbfs, _gamma, _k, taskset)){
 		ROS_ERROR("Update failed");
 		
 	}else{
 		Eigen::Matrix<c_float, -1, 1> usol;
-
+		
 		if(solver.solveProblem() != OsqpEigen::ErrorExitFlag::NoError){
 			ROS_ERROR("Problem solution ERROR");
 			
@@ -421,7 +433,16 @@ void KUKA_CONTROL::solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, i
 			usol = solver.getSolution();
 			u << usol(0), usol(1), usol(2), usol(3), usol(4), usol(5), usol(6);
 		}
+		
 	}
+	sec2 = ros::WallTime::now().toNSec();
+	#if SOL_TIME_EVAL
+	sec = sec/(1000*1000); // ms
+	sec2 = sec2/(1000*1000); // ms
+	_tsol.push_back(sec2-sec);
+	cout << "Solution time [ms]: " << std::fixed << std::setprecision(8) << sec2-sec << std::endl;
+	_outFile << std::fixed << std::setprecision(8) << sec2-sec << ",";
+	#endif
 }
 
 void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float64MultiArray & h){
@@ -467,7 +488,7 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 				case 3:   //  eePoint1 < eePoint2 < vision
 				{
 					Eigen::Vector3d dpe(0.3, 0.2, 0.8);
-					Eigen::Vector3d dpe2(0.2, -0.2, 0.7);
+					Eigen::Vector3d dpe2(0.3, -0.2, 0.7);
 					c1 = cbf_goto_point(dpe);
 					c2 = cbf_goto_point(dpe2);
 					c3 = cbf_vision();
@@ -481,8 +502,8 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 				}break;
 				case 4:   // eePoint2 < eePoint1 < vision
 				{
-					Eigen::Vector3d dpe2(0.3, 0.3, 0.8);
-					Eigen::Vector3d dpe(0.2, -0.3, 0.8); // 0.2
+					Eigen::Vector3d dpe2(0.3, 0.2, 0.8);
+					Eigen::Vector3d dpe(0.3, -0.2, 0.7);
 					c1 = cbf_goto_point(dpe);
 					c2 = cbf_goto_point(dpe2);
 					c3 = cbf_vision();
@@ -573,7 +594,6 @@ void KUKA_CONTROL::ctrl_loop(){
 
 
 		if(_taskSet != 0){
-
 			prvtaskSet = taskSet;
 			taskSet = _taskSet;
 			_taskSet = 0;
@@ -581,6 +601,14 @@ void KUKA_CONTROL::ctrl_loop(){
 			stackChanged = true;		
 		}
 
+
+		if((iter == 1500 || iter == 11500|| iter == 21500 || iter == 28500) && !stackChanged){
+			prvtaskSet = taskSet;
+			taskSet++;
+			sigma = 0;
+			stackChanged = true;
+		}
+		
 		taskstack(prvtaskSet,cbfs_old,h);
 		taskstack(taskSet,cbfs,h);
  
@@ -597,7 +625,8 @@ void KUKA_CONTROL::ctrl_loop(){
 			// Interpolation
 			
 			u = u1*(1-sigma) + sigma*u2; 
-			if(sigma < 1) sigma = sigma + dt;
+			if(sigma < 1) sigma = sigma + 0.002f; //0.002f
+			if(sigma > 1) sigma = 1;
 
 		}else{
 			solveQP(_solver, cbfs, taskSet, u);
@@ -607,7 +636,12 @@ void KUKA_CONTROL::ctrl_loop(){
 		for(int k=0; k <_Nj; k++){
 			u_in.data[k] = u(k);
 			
-			vcmd[k].data = u(k) + _kp*(qd[k] - _qfb[k]);
+			vcmd[k].data = u(k);
+			if(taskSet == 5){
+				ROS_INFO("Home position");
+				vcmd[k].data = -_kp*_qfb[k];
+			}
+			//vcmd[k].data = u(k);
 			_j_pub[k].publish(vcmd[k]);
 			jv_command.data[k] = qd[k];
 			jv_command.data[7+k] = u(k);
@@ -619,8 +653,24 @@ void KUKA_CONTROL::ctrl_loop(){
 
 		_h_pub.publish(h);
 		_jv_pub.publish(jv_command);
-	
-	
+
+		#if SOL_TIME_EVAL
+		auto count = static_cast<float>(_tsol.size());
+		double mean = std::accumulate(_tsol.begin(), _tsol.end(),0.0) / count;
+
+		double variance = 0.0;
+		for (double value : _tsol) {
+			variance += (value - mean) * (value - mean);
+		}
+		variance /= _tsol.size(); 
+		double stddev = std::sqrt(variance);
+
+		std::cout << "Mean solution time [ms]: " << mean << std::endl;
+		std::cout << "Variance: " << stddev << std::endl;
+
+		#endif
+		iter++;
+
 		r.sleep();
 		ros::spinOnce();
 	}
@@ -640,7 +690,7 @@ KUKA_CONTROL::~KUKA_CONTROL(){
 
 	delete []	_J_solver;
 	delete []	_J3_solver;
-
+	_outFile.close();
 }
 
 void KUKA_CONTROL::run() {
