@@ -188,11 +188,11 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
   if(taskset == 1){
     A_s.insert(17,7) = k;
     A_s.insert(17,8) = -1;
-    A_s.insert(17,10) = 1;
+    A_s.insert(17,10) = 0*1;
 
     A_s.insert(18,8) = 0;
     A_s.insert(18,9) = -1;
-    A_s.insert(18,11) = k;
+    A_s.insert(18,11) = 0*k; //0*k;
 
     // A_s.insert(17,7) = 1;
     // A_s.insert(17,8) = -1/k;
@@ -205,11 +205,11 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
   }else{
     A_s.insert(17,7) = k;
     A_s.insert(17,8) = -1;
-    A_s.insert(17,10) = 1;
+    A_s.insert(17,10) = 0*1;
 
     A_s.insert(18,8) = k;
     A_s.insert(18,9) = -1;
-    A_s.insert(18,11) = k;
+    A_s.insert(18,11) = 0*k; //0*k;
 
     // A_s.insert(17,7) = 1;
     // A_s.insert(17,8) = -1/k;

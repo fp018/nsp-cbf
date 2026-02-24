@@ -5,20 +5,23 @@ windows:
 - window_name: simulation
   layout: tiled
   panes:
-    - shell_command:               
+    - shell_command:              
+        - rm -r /tmp/tmux_pipe 
         - cd /catkin_ws && source devel/setup.bash 
         - roslaunch iiwa_qp iiwa_v.launch
-    - shell_command:    
-        - cd /catkin_ws && source devel/setup.bash 
-        - rosrun visp_ros test-gazebo
-    - shell_command:     
-        - cd /catkin_ws && source devel/setup.bash
-        - sleep 10
-        - rosrun iiwa_qp iiwa_control > /tmp/tmux_pipe
+    #- shell_command:    
+    #    - cd /catkin_ws && source devel/setup.bash 
+        #- rosrun visp_ros test-gazebo
+        #- rosrun plotjuggler plotjuggler
+    #- shell_command:    
+    #    - cd /catkin_ws && source devel/setup.bash 
+        #- rosrun visp_ros test-gazebo
     - shell_command:
-        - cd /catkin_ws && source devel/setup.bash 
-        - sleep 10   
+        - cd /catkin_ws && source /catkin_ws/devel/setup.bash  
         - mkfifo /tmp/tmux_pipe
         - cat /tmp/tmux_pipe
-        
+    - shell_command:     
+        - cd /catkin_ws && source devel/setup.bash
+        - sleep 5
+        - rosrun iiwa_qp iiwa_control > /tmp/tmux_pipe
 

@@ -3,7 +3,7 @@ gamma: 0.75
 lu: 1
 ldelta: 1
 lkappa: 50
-k: 100  
+k: 20 #100 
 
 k1: 1
 k2: 1

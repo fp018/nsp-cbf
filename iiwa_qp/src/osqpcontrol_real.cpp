@@ -167,7 +167,7 @@ KUKA_CONTROL::KUKA_CONTROL() {
 	
 	_q_in = new KDL::JntArray(_Nj);
 	_dq_in = new KDL::JntArray(_Nj);
-  _q_3in = new KDL::JntArray(3);
+    _q_3in = new KDL::JntArray(3);
 	_dq_3in = new KDL::JntArray(3);
 
 	_fksolver = new KDL::ChainFkSolverPos_recursive( _k_chain );
@@ -186,12 +186,12 @@ KUKA_CONTROL::KUKA_CONTROL() {
 
 bool KUKA_CONTROL::init_model(){
 
-  std::string robot_desc_string;
-  _nh.param("robot_description", robot_desc_string, std::string());
-  if (!kdl_parser::treeFromString(robot_desc_string, iiwa_tree)){
-     ROS_ERROR("Failed to construct kdl tree");
-     return false;
-  }
+  	std::string robot_desc_string;
+	_nh.param("robot_description", robot_desc_string, std::string());
+	if (!kdl_parser::treeFromString(robot_desc_string, iiwa_tree)){
+		ROS_ERROR("Failed to construct kdl tree");
+		return false;
+	}
 
 	std::string base_link = "world";
 	std::string tip_link = "iiwa_link_7";
@@ -446,6 +446,7 @@ void KUKA_CONTROL::solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, i
 		}
 	}
 }
+
 void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs){
 	
 	cbf c1;
@@ -655,7 +656,7 @@ void KUKA_CONTROL::ctrl_loop(){
 
 	
 	vector<cbf> cbfs_old = {};
-  vector<cbf> cbfs = {};
+  	vector<cbf> cbfs = {};
 
 	std_msgs::Float64MultiArray h;
 	h.data.resize(3);

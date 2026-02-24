@@ -602,12 +602,12 @@ void KUKA_CONTROL::ctrl_loop(){
 		}
 
 
-		if((iter == 1500 || iter == 11500|| iter == 21500 || iter == 28500) && !stackChanged){
-			prvtaskSet = taskSet;
-			taskSet++;
-			sigma = 0;
-			stackChanged = true;
-		}
+		// if((iter == 1500 || iter == 11500|| iter == 21500 || iter == 28500) && !stackChanged){
+		// 	prvtaskSet = taskSet;
+		// 	taskSet++;
+		// 	sigma = 0;
+		// 	stackChanged = true;
+		// }
 		
 		taskstack(prvtaskSet,cbfs_old,h);
 		taskstack(taskSet,cbfs,h);
