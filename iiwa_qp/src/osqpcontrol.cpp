@@ -35,7 +35,7 @@
 #define STACK 1
 #define DQPINTRP 1
 //#define NOINTERP 1
-#define SOL_TIME_EVAL 1
+#define SOL_TIME_EVAL 0
 
 #define dt 0.001
 
@@ -116,8 +116,7 @@ class KUKA_CONTROL {
 		float _gamma;
 		float _lu;
 		float _ldelta;
-		float _lk;
-		float _k;
+	
 
 		int _Nj; // number of joints
 		vector<float> _q_min;
@@ -214,18 +213,13 @@ bool KUKA_CONTROL::set_qp(){
 
 	bool dflt = false;
 
-	if(!_nh.getParam("gamma", _gamma) || !_nh.getParam("lu", _lu) ||  !_nh.getParam("ldelta", _ldelta) || !_nh.getParam("lkappa", _lk) || !_nh.getParam("k", _k)){
+	if(!_nh.getParam("gamma", _gamma) || !_nh.getParam("lu", _lu) ||  !_nh.getParam("ldelta", _ldelta)){
 		ROS_WARN("Using default QP values");	
-		// _lu = 1;
-		// _gamma = 0.1;
-		// _ldelta = 10;
-		// _lk = 1;
-		// _k = 1;
+
 		_lu = 1;
-		_gamma = 0.2;
-		_ldelta = 1;
-		_lk = 50;
-		_k = 100;
+		_gamma = 1.0;
+		_ldelta = 1000;
+
 		dflt = true;
 	}else{
 		ROS_INFO("Parameters loaded");
@@ -420,7 +414,7 @@ void KUKA_CONTROL::solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, i
 	double sec2;
 	sec = ros::WallTime::now().toNSec();
 
-	if(!updateQP(solver, cbfs, _gamma, _k, taskset)){
+	if(!updateQP(solver, cbfs, _gamma, _lu, _ldelta, taskset)){
 		ROS_ERROR("Update failed");
 		
 	}else{
@@ -440,7 +434,7 @@ void KUKA_CONTROL::solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, i
 	sec = sec/(1000*1000); // ms
 	sec2 = sec2/(1000*1000); // ms
 	_tsol.push_back(sec2-sec);
-	cout << "Solution time [ms]: " << std::fixed << std::setprecision(8) << sec2-sec << std::endl;
+	//cout << "Solution time [ms]: " << std::fixed << std::setprecision(8) << sec2-sec << std::endl;
 	_outFile << std::fixed << std::setprecision(8) << sec2-sec << ",";
 	#endif
 }
@@ -502,10 +496,10 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 				}break;
 				case 4:   // eePoint2 < eePoint1 < vision
 				{
-					Eigen::Vector3d dpe2(0.3, 0.2, 0.8);
-					Eigen::Vector3d dpe(0.3, -0.2, 0.7);
-					c1 = cbf_goto_point(dpe);
-					c2 = cbf_goto_point(dpe2);
+					Eigen::Vector3d dpe(0.3, 0.2, 0.8);
+					Eigen::Vector3d dpe2(0.3, -0.2, 0.7);
+					c1 = cbf_goto_point(dpe2);
+					c2 = cbf_goto_point(dpe);
 					c3 = cbf_vision();
 					cbfs.push_back(c1);
 					cbfs.push_back(c2);
@@ -541,7 +535,7 @@ void KUKA_CONTROL::ctrl_loop(){
 	u_in.data.resize(7);
 	jcmd.resize(7);
 	vcmd.resize(7);
-  jv_command.data.resize(14);
+  	jv_command.data.resize(14);
 	
 	while(!_first_js){
 		ros::spinOnce();
@@ -576,11 +570,11 @@ void KUKA_CONTROL::ctrl_loop(){
 
 	// Initialize solvers
 
-	if(!initQP(_solver,_lu, _ldelta, _lk, _gamma, _k, cbfs)){
+	if(!initQP(_solver,_lu, _ldelta, _gamma, cbfs)){
 		ROS_ERROR("Problem init failed");
 		exit(1);
 	}
-	if(!initQP(_solverprv,_lu, _ldelta, _lk, _gamma, _k, cbfs)){
+	if(!initQP(_solverprv,_lu, _ldelta, _gamma, cbfs)){
 		ROS_ERROR("Problem init failed");
 		exit(1);
 	}
@@ -665,8 +659,8 @@ void KUKA_CONTROL::ctrl_loop(){
 		variance /= _tsol.size(); 
 		double stddev = std::sqrt(variance);
 
-		std::cout << "Mean solution time [ms]: " << mean << std::endl;
-		std::cout << "Variance: " << stddev << std::endl;
+		// std::cout << "Mean solution time [ms]: " << mean << std::endl;
+		// std::cout << "Variance: " << stddev << std::endl;
 
 		#endif
 		iter++;
