@@ -63,6 +63,7 @@ class KUKA_CONTROL {
 		cbf  cbf_goto_point(const Eigen::Vector3d &dpe);
 		cbf  cbf_goto_z_3link(const float &d3z);
 		cbf  cbf_vision();
+		cbf  cbf_keep_ee_horizontal();
 		void cbf_joint_limits(vector<cbf> &cbfjl);
 		void taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float64MultiArray & h);
 		void solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, int taskset, Vector7d& u);
@@ -316,10 +317,34 @@ cbf KUKA_CONTROL::cbf_goto_z_3link(const float &d3z){
 	cbf3z.dhdq.resize(7);
 	cbf3z.h = -50*(_T3.p.z()-d3z)*(_T3.p.z()-d3z);  
 
-	cbf3z.dhdq << -50*0.5*(_T3.p.z()-d3z)*Eigen::Vector3d(_J3.row(2)),0,0,0,0;
+	cbf3z.dhdq << -50*2*(_T3.p.z()-d3z)*Eigen::Vector3d(_J3.row(2)),0,0,0,0;
 
 	return cbf3z;
 }
+
+cbf KUKA_CONTROL::cbf_keep_ee_horizontal(){
+
+	cbf cbfEEhor;
+	cbfEEhor.dhdq.resize(_Nj);
+	Eigen::Vector3d z(_Te.M.UnitZ()(0), _Te.M.UnitZ()(1), _Te.M.UnitZ()(2));
+
+	cbfEEhor.h = -(z.squaredNorm() + 1 -2* _Te.M.UnitZ()(2));   // -(z - [0,0,1]')'(z - [0,0,1]')
+	
+	Eigen::MatrixXd omegaJ = _J.block(3,0,3,_Nj);
+
+
+	Eigen::Vector3d ez;
+	ez = z - Eigen::Vector3d(0,0,1);
+
+	cbfEEhor.dhdq =  -2* Eigen::Vector3d(-ez(1)*z(2) + ez(2)*z(1), 
+								           ez(0)*z(2) - ez(2)*z(0),
+										  -ez(0)*z(1) + ez(1)*z(0)).transpose()*omegaJ;
+
+	// ------------------------------------------------------------------------------
+
+	return cbfEEhor;
+}
+
 
 cbf KUKA_CONTROL::cbf_vision(){
 
@@ -453,7 +478,7 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 				{	
 					Eigen::Vector3d dpe(0.3, 0.2, 0.8);
 					c1 = cbf_goto_point(dpe);
-					c2 = cbf_vision();
+					c2 = cbf_keep_ee_horizontal();//cbf_vision();
 					c3.h = 0;
 					c3.dhdq.resize(_Nj);
 					c3.dhdq.setZero();
@@ -463,7 +488,7 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 					
 					h.data[0] = c1.h;
 					h.data[1] = c2.h;
-					h.data[2] = 0;
+					h.data[2] = c3.h;
 				}break;
 				case 2:   //  eePoint < 3linkz < vision
 				{
@@ -505,6 +530,25 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 					cbfs.push_back(c2);
 					cbfs.push_back(c3);					
 
+					h.data[0] = c1.h;
+					h.data[1] = c2.h;
+					h.data[2] = c3.h;
+				}break;
+				case 6:   // eePoint2 < eePoint1 < vision
+				{
+					Eigen::Vector3d dpe(0.3, 0.2, 0.8);
+					c1 = cbf_keep_ee_horizontal();
+					c2 = cbf_goto_point(dpe);
+					c2.h = 0;
+					c2.dhdq.setZero();
+					c3.h = 0;
+					c3.dhdq.resize(_Nj);
+					c3.dhdq.setZero();
+
+					cbfs.push_back(c1);
+					cbfs.push_back(c2);    
+					cbfs.push_back(c3);  
+					
 					h.data[0] = c1.h;
 					h.data[1] = c2.h;
 					h.data[2] = c3.h;
