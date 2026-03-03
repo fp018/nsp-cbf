@@ -60,10 +60,11 @@ class KUKA_CONTROL {
 		void ctrl_loop();
 		void task_set_input();
 
-		cbf  cbf_goto_point(const Eigen::Vector3d &dpe);
-		cbf  cbf_goto_z_3link(const float &d3z);
-		cbf  cbf_vision();
-		cbf  cbf_keep_ee_horizontal();
+		cbf cbf_goto_point(const Eigen::Vector3d &dpe);
+		cbf cbf_goto_z_3link(const float &d3z);
+		cbf cbf_vision();
+		cbf cbf_keep_ee_horizontal();
+		cbf cbf_approach_grasp_plate(Vector3d plate_pos, Vector3d plate_n, float r);
 		void cbf_joint_limits(vector<cbf> &cbfjl);
 		void taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float64MultiArray & h);
 		void solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, int taskset, Vector7d& u);
@@ -104,7 +105,6 @@ class KUKA_CONTROL {
 		KDL::Frame _T3;
 		KDL::FrameVel _dirkin_out;
 		KDL::FrameVel _dirkin_out3;
-
 
 		Eigen::VectorXd _vel; 
 		Eigen::MatrixXd _J;
@@ -337,14 +337,38 @@ cbf KUKA_CONTROL::cbf_keep_ee_horizontal(){
 	ez = z - Eigen::Vector3d(0,0,1);
 
 	cbfEEhor.dhdq =  -2* Eigen::Vector3d(-ez(1)*z(2) + ez(2)*z(1), 
-								           ez(0)*z(2) - ez(2)*z(0),
-										  -ez(0)*z(1) + ez(1)*z(0)).transpose()*omegaJ;
+								          ez(0)*z(2) - ez(2)*z(0),
+										 -ez(0)*z(1) + ez(1)*z(0)).transpose()*omegaJ;
 
 	// ------------------------------------------------------------------------------
 
 	return cbfEEhor;
 }
 
+cbf KUKA_CONTROL::cbf_approach_grasp_plate(Vector3d plate_pos, Vector3d plate_n, float r){
+
+	cbf cbfEEplate;
+	cbfEEplate.dhdq.resize(_Nj);
+	Eigen::Vector3d y(_Te.M.UnitY()(0), _Te.M.UnitY()(1), _Te.M.UnitY()(2)); // Gripper sliding direction (y-axis of the end-effector frame)
+	Eigen::Vector3d p(_Te.p.x(), _Te.p.y(), _Te.p.z());
+
+	cbfEEplate.h = -((p - plate_pos).squaredNorm() - r*r) - (y - plate_n).squaredNorm();   
+	
+	
+	Eigen::MatrixXd omegaJ = _J.block(3,0,3,_Nj);
+
+
+	Eigen::Vector3d e;
+	e = y - plate_n;
+
+	cbfEEplate.dhdq =  -2*(p-plate_pos).transpose()*_J.block(0,0,3,_Nj) -2* Eigen::Vector3d(-e(1)*y(2) + e(2)*y(1), 
+																							 e(0)*y(2) - e(2)*y(0),
+																							-e(0)*y(1) + e(1)*y(0)).transpose()*omegaJ;
+
+	// ------------------------------------------------------------------------------
+
+	return cbfEEplate;
+}
 
 cbf KUKA_CONTROL::cbf_vision(){
 
@@ -428,6 +452,7 @@ void KUKA_CONTROL::cbf_joint_limits(vector<cbf> &cbfjl){
 
 void KUKA_CONTROL::task_set_input(){
 	int i=0;
+
 	while(ros::ok()){
 		if( scanf("%d",&i) ) _taskSet = i;
 	}
@@ -474,7 +499,7 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 	cbf_joint_limits(cbfs); 
 
 	switch(taskSet){
-				case 1:     //  eePoint < vision
+				case 1:    //  eePoint < eeHoriz  //  eePoint < vision   
 				{	
 					Eigen::Vector3d dpe(0.3, 0.2, 0.8);
 					c1 = cbf_goto_point(dpe);
@@ -534,13 +559,11 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 					h.data[1] = c2.h;
 					h.data[2] = c3.h;
 				}break;
-				case 6:   // eePoint2 < eePoint1 < vision
+				case 5:   // eeHoriz < eePoint2
 				{
-					Eigen::Vector3d dpe(0.3, 0.2, 0.8);
+					Eigen::Vector3d dpe2(0.3, -0.2, 0.7);
 					c1 = cbf_keep_ee_horizontal();
-					c2 = cbf_goto_point(dpe);
-					c2.h = 0;
-					c2.dhdq.setZero();
+					c2 = cbf_goto_point(dpe2);
 					c3.h = 0;
 					c3.dhdq.resize(_Nj);
 					c3.dhdq.setZero();
@@ -553,6 +576,27 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 					h.data[1] = c2.h;
 					h.data[2] = c3.h;
 				}break;
+				case 6:
+				{
+					Eigen::Vector3d plate(0.3, -0.2, 0.7);
+					Eigen::Vector3d n(0.0, 0.5, 0.5);
+					n.normalize();
+					c1 = cbf_approach_grasp_plate(plate, n, 0.4);
+					c2.h = 0;
+					c2.dhdq.resize(_Nj);
+					c2.dhdq.setZero();
+					c3.h = 0;
+					c3.dhdq.resize(_Nj);
+					c3.dhdq.setZero();
+
+					cbfs.push_back(c1);
+					cbfs.push_back(c2);    
+					cbfs.push_back(c3);  
+					
+					h.data[0] = c1.h;
+					h.data[1] = c2.h;
+					h.data[2] = c3.h;
+				}
 				default:
 					c1.h = 0;
 					c1.dhdq.resize(_Nj);
@@ -675,7 +719,7 @@ void KUKA_CONTROL::ctrl_loop(){
 			u_in.data[k] = u(k);
 			
 			vcmd[k].data = u(k);
-			if(taskSet == 5){
+			if(taskSet == 10){
 				ROS_INFO("Home position");
 				vcmd[k].data = -_kp*_qfb[k];
 			}
@@ -732,7 +776,12 @@ KUKA_CONTROL::~KUKA_CONTROL(){
 }
 
 void KUKA_CONTROL::run() {
-	
+	cout << "Insert task set (1-5) or 0 for no task, 10 to reset to home position:\n"
+	     << "1: eePoint < eeHoriz  < vision \n"
+		 << "2: eePoint < 3linkz < vision \n"
+		 << "3: eePoint1 < eePoint2 < vision \n"
+		 << "4: eePoint2 < eePoint1 < vision \n"
+		 << "5: eeHoriz < eePoint2 \n";
 	//boost::thread ctrl_loop_t ( &KUKA_CONTROL::ctrl_loop, this);
 	boost::thread task_set_t( &KUKA_CONTROL::task_set_input, this);
 
