@@ -1,0 +1,123 @@
+kuka_iiwa:
+  # Publish all joint states -----------------------------------
+  joint_state_controller:
+    type: joint_state_controller/JointStateController
+    publish_rate: 400  
+  # joint1_position_controller:
+  #   type: position_controllers/JointPositionController
+  #   joint: iiwa_joint_1
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint2_position_controller:
+  #   type: position_controllers/JointPositionController
+  #   joint: iiwa_joint_2
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint3_position_controller:
+  #   type: position_controllers/JointPositionController
+  #   joint: iiwa_joint_3
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint4_position_controller:
+  #   type: position_controllers/JointPositionController
+  #   joint: iiwa_joint_4
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint5_position_controller:
+  #   type: position_controllers/JointPositionController
+  #   joint: iiwa_joint_5
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint6_position_controller:
+  #   type: position_controllers/JointPositionController
+  #   joint: iiwa_joint_6
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint7_position_controller:
+  #   type: position_controllers/JointPositionController
+  #   joint: iiwa_joint_7
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+
+
+  joint1_velocity_controller:
+    type: velocity_controllers/JointVelocityController
+    joint: iiwa_joint_1
+    pid: {p: 500,  d: 30, i: 15, i_clamp: 30}
+  joint2_velocity_controller:
+    type: velocity_controllers/JointVelocityController
+    joint: iiwa_joint_2
+    pid: {p: 200,  d: 10, i: 10, i_clamp: 30}
+  joint3_velocity_controller:
+    type: velocity_controllers/JointVelocityController
+    joint: iiwa_joint_3
+    pid: {p: 65,  d: 10, i: 15, i_clamp: 30}
+  joint4_velocity_controller:
+    type: velocity_controllers/JointVelocityController
+    joint: iiwa_joint_4
+    pid: {p: 31,  d: 7, i: 12, i_clamp: 30}
+  joint5_velocity_controller:
+    type: velocity_controllers/JointVelocityController
+    joint: iiwa_joint_5
+    pid: {p: 23,  d: 3, i: 5, i_clamp: 30}
+  joint6_velocity_controller:
+    type: velocity_controllers/JointVelocityController
+    joint: iiwa_joint_6
+    pid: {p: 13,  d: 3, i: 3, i_clamp: 30}
+  joint7_velocity_controller:
+    type: velocity_controllers/JointVelocityController
+    joint: iiwa_joint_7
+    pid: {p: 17,  d: 2, i: 2.5, i_clamp: 10}
+
+
+  # joint1_velocity_controller:
+  #   type: effort_controllers/JointEffortController
+  #   joint: iiwa_joint_1
+  #   pid: {p: 500,  d: 30, i: 15, i_clamp: 30}
+  # joint2_velocity_controller:
+  #   type: effort_controllers/JointEffortController
+  #   joint: iiwa_joint_2
+  #   pid: {p: 200,  d: 10, i: 10, i_clamp: 30}
+  # joint3_velocity_controller:
+  #   type: effort_controllers/JointEffortController
+  #   joint: iiwa_joint_3
+  #   pid: {p: 65,  d: 10, i: 15, i_clamp: 30}
+  # joint4_velocity_controller:
+  #   type: effort_controllers/JointEffortController
+  #   joint: iiwa_joint_4
+  #   pid: {p: 31,  d: 7, i: 12, i_clamp: 30}
+  # joint5_velocity_controller:
+  #   type: effort_controllers/JointEffortController
+  #   joint: iiwa_joint_5
+  #   pid: {p: 23,  d: 3, i: 5, i_clamp: 30}
+  # joint6_velocity_controller:
+  #   type: effort_controllers/JointEffortController
+  #   joint: iiwa_joint_6
+  #   pid: {p: 13,  d: 3, i: 3, i_clamp: 30}
+  # joint7_velocity_controller:
+  #   type: effort_controllers/JointEffortController
+  #   joint: iiwa_joint_7
+  #   pid: {p: 17,  d: 2, i: 2.5, i_clamp: 10}
+
+
+  # joint1_velocity_controller:
+  #   type: effort_controllers/JointVelocityController
+  #   joint: iiwa_joint_1
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint2_velocity_controller:
+  #   type: effort_controllers/JointVelocityController
+  #   joint: iiwa_joint_2
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint3_velocity_controller:
+  #   type: effort_controllers/JointVelocityController
+  #   joint: iiwa_joint_3
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint4_velocity_controller:
+  #   type: effort_controllers/JointVelocityController
+  #   joint: iiwa_joint_4
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint5_velocity_controller:
+  #   type: effort_controllers/JointVelocityController
+  #   joint: iiwa_joint_5
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint6_velocity_controller:
+  #   type: effort_controllers/JointVelocityController
+  #   joint: iiwa_joint_6
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}
+  # joint7_velocity_controller:
+  #   type: effort_controllers/JointVelocityController
+  #   joint: iiwa_joint_7
+  #   pid: {p: 100.0, i: 0.01, d: 10.0}

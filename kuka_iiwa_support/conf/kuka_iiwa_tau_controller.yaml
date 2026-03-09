@@ -1,0 +1,36 @@
+kuka_iiwa:
+  # Publish all joint states -----------------------------------
+  joint_state_controller:
+    type: joint_state_controller/JointStateController
+    publish_rate: 1000  
+
+  joint1_effort_controller:
+    type: effort_controllers/JointEffortController
+    joint: iiwa_joint_1
+    #pid: {p: 500,  d: 30, i: 15, i_clamp: 30}
+  joint2_effort_controller:
+    type: effort_controllers/JointEffortController
+    joint: iiwa_joint_2
+    #pid: {p: 500,  d: 20, i: 15, i_clamp: 30}
+  joint3_effort_controller:
+    type: effort_controllers/JointEffortController
+    joint: iiwa_joint_3
+    #pid: {p: 65,  d: 10, i: 15, i_clamp: 30}
+  joint4_effort_controller:
+    type: effort_controllers/JointEffortController
+    joint: iiwa_joint_4
+    #pid: {p: 31,  d: 7, i: 12, i_clamp: 30}
+  joint5_effort_controller:
+    type: effort_controllers/JointEffortController
+    joint: iiwa_joint_5
+    #pid: {p: 23,  d: 3, i: 5, i_clamp: 30}
+  joint6_effort_controller:
+    type: effort_controllers/JointEffortController
+    joint: iiwa_joint_6
+    #pid: {p: 13,  d: 3, i: 3, i_clamp: 30}
+  joint7_effort_controller:
+    type: effort_controllers/JointEffortController
+    joint: iiwa_joint_7
+    #pid: {p: 17,  d: 2, i: 2.5, i_clamp: 10}
+
+
