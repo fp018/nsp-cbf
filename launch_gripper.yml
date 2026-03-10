@@ -8,7 +8,7 @@ windows:
     - shell_command:              
         - rm -r /tmp/tmux_pipe 
         - cd /catkin_ws && source devel/setup.bash 
-        - roslaunch iiwa_qp iiwa_gripper.launch #roslaunch iiwa_qp iiwa_v.launch
+        - roslaunch iiwa_qp iiwa_v.launch
     #- shell_command:    
     #    - cd /catkin_ws && source devel/setup.bash 
         #- rosrun visp_ros test-gazebo

@@ -9,7 +9,7 @@
 	<arg name="headless" default="false"/>
 	<arg name="debug" default="false"/>
 	<arg name="simulation" default="true"/>
-	<arg name="launch_rviz" default="true"/>
+	<arg name="launch_rviz" default="false"/>
 	<arg name="rviz_config" default="$(find kuka_iiwa_support)/rviz/gripper.rviz"/>
 	
 	<!-- We resume the logic in empty_world.launch -->
@@ -25,25 +25,17 @@
 		<arg name="headless" value="$(arg headless)"/>
 	</include>
 
-	<!-- Load the URDF into the ROS Parameter Server -->
-	<param name="robot_description" command="$(find xacro)/xacro '$(find kuka_iiwa_support)/urdf/kuka_iiwa_ctrl_gripper.xacro'" />
-	<!-- Run a python script to the send a service call to gazebo_ros to spawn a URDF robot -->
-	<node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" respawn="false" output="screen" args="-urdf -model iiwa -param robot_description"/>
-
-	<!-- Optional RViz visualization -->
-	<node if="$(arg launch_rviz)" name="rviz" pkg="rviz" type="rviz" output="screen" args="-d $(arg rviz_config)"/>
-
-	<rosparam file="$(find kuka_iiwa_support)/conf/kuka_iiwa_controller.yaml" command="load"/>
+	<rosparam file="$(find kuka_iiwa_support)/conf/kuka_iiwa_vel_controller.yaml" command="load"/>
 
 	<node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false" output="screen" ns="/kuka_iiwa"
 		args="joint_state_controller
-		joint1_position_controller
-		joint2_position_controller
-		joint3_position_controller
-		joint4_position_controller
-		joint5_position_controller
-		joint6_position_controller
-		joint7_position_controller" />
+		joint1_velocity_controller
+		joint2_velocity_controller
+		joint3_velocity_controller
+		joint4_velocity_controller
+		joint5_velocity_controller
+		joint6_velocity_controller
+		joint7_velocity_controller" />
 
 	<!-- Load gripper controllers in robot namespace and override joint names for integrated model -->
 	<rosparam file="$(find wsg50_simulation)/controllers/wsg_50_gr.yaml" command="load" ns="/kuka_iiwa"/>
@@ -60,14 +52,17 @@
 		args="/wsg_50_gr/command /kuka_iiwa/wsg_50_gr/command"/>
 
 
-	<!-- Bridge either joint-state topic spelling to /joint_states for TF publication -->
-	<node name="joint_states_bridge_kuka_iwa" pkg="topic_tools" type="relay" output="screen"
-		args="/kuka_iwa/joint_states /joint_states"/>
-	<node name="joint_states_bridge_kuka_iiwa" pkg="topic_tools" type="relay" output="screen"
-		args="/kuka_iiwa/joint_states /joint_states"/>
-
 	<!-- Publish TF from /joint_states -->
 	<node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" output="screen"/>
 	
+
+	<!-- Load the URDF into the ROS Parameter Server -->
+	<param name="robot_description" command="$(find xacro)/xacro '$(find kuka_iiwa_support)/urdf/kuka_iiwa_vel_ctrl_gripper.xacro'" />
+	<!-- Run a python script to the send a service call to gazebo_ros to spawn a URDF robot -->
+	<node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" respawn="false" output="screen" args="-urdf -model iiwa -param robot_description"/>
+
+	<!-- Optional RViz visualization -->
+	<node if="$(arg launch_rviz)" name="rviz" pkg="rviz" type="rviz" output="screen" args="-d $(arg rviz_config)"/>
+
 </launch>
 

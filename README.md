@@ -29,6 +29,19 @@ tmux kill-session
 ```
 
 
+# To attach and detach objects in gazebo
+To attach an object to the robot, run the following command in a terminal:
+
+```bash
+rosservice call /gazebo/attach "{model_name_1: 'iiwa', link_name_1: 'wsg_50_gripper_left', model_name_2: 'grasp_plate', link_name_2: 'plate_link'}"
+``` 
+
+To detach an object from the robot, run the following command in a terminal:
+
+```bash
+rosservice call /gazebo/detach "{model_name_1: 'iiwa', link_name_1: 'wsg_50_gripper_left', model_name_2: 'grasp_plate', link_name_2: 'plate_link'}"
+```
+
 # References
 
 [1] B. Stellato, G. Banjac, P. Goulart, A. Bemporad, and S. Boyd, “OSQP: an operator splitting solver for quadratic programs,” Mathematical Programming Computation, vol. 12, no. 4, pp. 637–672, 2020, doi: 10.1007/s12532-020-00179-2.
