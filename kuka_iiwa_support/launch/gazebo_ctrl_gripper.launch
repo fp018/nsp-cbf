@@ -3,13 +3,13 @@
 
 <launch>
 
-	<arg name="paused" default="true"/>
+	<arg name="paused" default="false"/>
 	<arg name="use_sim_time" default="true"/>
 	<arg name="gui" default="true"/>
 	<arg name="headless" default="false"/>
 	<arg name="debug" default="false"/>
 	<arg name="simulation" default="true"/>
-	<arg name="launch_rviz" default="false"/>
+	<arg name="launch_rviz" default="true"/>
 	<arg name="rviz_config" default="$(find kuka_iiwa_support)/rviz/gripper.rviz"/>
 	
 	<!-- We resume the logic in empty_world.launch -->
@@ -53,7 +53,9 @@
 
 
 	<!-- Publish TF from /joint_states -->
-	<node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" output="screen"/>
+	<node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" output="screen">
+		<remap from="joint_states" to="/kuka_iiwa/joint_states"/>
+	</node>
 	
 
 	<!-- Load the URDF into the ROS Parameter Server -->

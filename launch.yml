@@ -23,7 +23,7 @@ windows:
     - shell_command:     
         - cd /catkin_ws && source devel/setup.bash
         - sleep 5
-        - rosrun iiwa_qp iiwa_control > /tmp/tmux_pipe
+        - rosrun iiwa_qp iiwa_control_grip > /tmp/tmux_pipe
     # - shell_command:
     #     - cd /catkin_ws && source devel/setup.bash
     #     - sleep 5

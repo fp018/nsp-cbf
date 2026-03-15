@@ -11,6 +11,7 @@ project(iiwa_qp)
 add_compile_options(-std=c++11)
 find_package( Eigen3 REQUIRED )
 include_directories(${EIGEN3_INCLUDE_DIR})
+find_package(orocos_kdl REQUIRED)
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
@@ -54,11 +55,15 @@ include_directories( include ${catkin_INCLUDE_DIRS} )
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
+  ${orocos_kdl_INCLUDE_DIRS}
  
 )
 
 
 add_executable(iiwa_control src/osqpcontrol.cpp src/lbr_iiwa_7_robot.cpp )
-target_link_libraries(iiwa_control PUBLIC OsqpEigen::OsqpEigen ${catkin_LIBRARIES} )
+target_link_libraries(iiwa_control PUBLIC OsqpEigen::OsqpEigen ${catkin_LIBRARIES} ${orocos_kdl_LIBRARIES})
 #add_dependencies(iiwa_control iiwa_qp)
 
+
+add_executable(iiwa_control_grip src/osqpcontrol_gripper.cpp src/lbr_iiwa_7_robot.cpp )
+target_link_libraries(iiwa_control_grip PUBLIC OsqpEigen::OsqpEigen ${catkin_LIBRARIES} ${orocos_kdl_LIBRARIES})

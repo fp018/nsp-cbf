@@ -147,7 +147,7 @@
     <plugin name="model_attachment_plugin" filename="libboeing_gazebo_model_attachment_plugin.so"/>
 
     <model name='grasp_plate'>
-      <pose>1 0 0.4 0 0 0</pose>
+      <pose>0.8 -0.1 0.6 -1.0 0 0</pose>
       <static>false</static>
       <link name='plate_link'>
         <inertial>
@@ -164,7 +164,7 @@
         <collision name='collision'>
           <geometry>
             <cylinder>
-              <radius>0.1</radius>
+              <radius>0.2</radius>
               <length>0.01</length>
             </cylinder>
           </geometry>
@@ -180,7 +180,7 @@
         <visual name='visual'>
           <geometry>
             <cylinder>
-              <radius>0.18</radius>
+              <radius>0.2</radius>
               <length>0.01</length>
             </cylinder>
           </geometry>
