@@ -8,7 +8,7 @@ windows:
     - shell_command:              
         - rm -r /tmp/tmux_pipe 
         - cd /catkin_ws && source devel/setup.bash 
-        - roslaunch iiwa_qp iiwa_v.launch
+        - roslaunch iiwa_qp iiwa_gripper.launch #roslaunch iiwa_qp iiwa_v.launch
     #- shell_command:    
     #    - cd /catkin_ws && source devel/setup.bash 
         #- rosrun visp_ros test-gazebo
@@ -23,10 +23,11 @@ windows:
     - shell_command:     
         - cd /catkin_ws && source devel/setup.bash
         - sleep 5
-        - rosrun iiwa_qp iiwa_control > /tmp/tmux_pipe
-    # - shell_command:
-    #     - cd /catkin_ws && source devel/setup.bash
-    #     - sleep 5
-    #     - rosrun plotjuggler plotjuggler
+        - rosrun iiwa_qp iiwa_control_grip > /tmp/tmux_pipe
+    - shell_command:
+        - cd /catkin_ws && source devel/setup.bash
+        - sleep 5
+        - roslaunch wsg50_simulation wsg_50_teleop.launch
+        #- rosrun plotjuggler plotjuggler
 
 

@@ -314,7 +314,8 @@
       <origin xyz="0 0 0" rpy="0 -${PI/2} 0"/>
     </xacro:wsg_50_xacro>
 
-    <link name="${robot_name}_gripper_midpoint"></link>
+    <link name="${robot_name}_gripper_midpoint">
+    </link>
     
     <joint name="${robot_name}_grasp_joint" type="fixed">
       <parent link="${robot_name}_link_ee"/>
@@ -322,6 +323,14 @@
       <origin xyz="0 0 0.15" rpy="0 0 ${PI/2}"/>
     </joint>
 
+    <link name="${robot_name}_plate_center">
+    </link>
+    
+    <joint name="${robot_name}_plate_joint" type="fixed">
+      <parent link="${robot_name}_gripper_midpoint"/>
+      <child link="${robot_name}_plate_center"/>
+      <origin xyz="0 0 0.2" rpy="0 0 0"/>
+    </joint>
 
 		<xacro:transmission_block joint_name="${robot_name}_joint_1"/>
 		<xacro:transmission_block joint_name="${robot_name}_joint_2"/>

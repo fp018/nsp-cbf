@@ -6,6 +6,7 @@
 #include <std_msgs/Float64MultiArray.h>
 #include <std_msgs/Float64.h>
 #include <std_msgs/Int8.h>
+#include <gazebo_msgs/ModelStates.h>
 
 #include <kdl_parser/kdl_parser.hpp>
 #include <kdl/chainfksolvervel_recursive.hpp>
@@ -52,6 +53,7 @@ class KUKA_CONTROL {
 		void joint_states_cb(const sensor_msgs::JointState & );
 		void artag_cb(const geometry_msgs::Pose &);
 		void taskset_cb(const std_msgs::Int8 &);
+		void modelStatesCallback(const gazebo_msgs::ModelStates::ConstPtr& msg);
 
 		void update_dirkin(Eigen::VectorXd &q_in); 
 		KDL::Jacobian Jacobian(KDL::JntArray* q_in);
@@ -63,7 +65,8 @@ class KUKA_CONTROL {
 		cbf cbf_goto_point(const Eigen::Vector3d &dpe);
 		cbf cbf_goto_z_3link(const float &d3z);
 		cbf cbf_vision();
-		cbf cbf_keep_ee_horizontal();
+		cbf cbf_keep_ee_z_horizontal();
+		cbf cbf_keep_ee_x_horizontal();
 		cbf cbf_approach_grasp_plate(Affine3d plateTf, float r);
 		cbf cbf_avoid_sphere(Vector3d center, float radius);
 		void cbf_joint_limits(vector<cbf> &cbfjl);
@@ -73,7 +76,7 @@ class KUKA_CONTROL {
 	private:
 
 		ros::NodeHandle _nh;
-		ros::Subscriber _js_sub, _tag_sub, _task_sub;
+		ros::Subscriber _js_sub, _tag_sub, _task_sub, _plate_sub;
 		ros::Publisher _js_pub;
 		ros::Publisher _u_pub, _h_pub, _jv_pub;
 		vector<ros::Publisher> _j_pub;
@@ -137,6 +140,7 @@ class KUKA_CONTROL {
 		double _kp;
 		Eigen::Vector3d _plate_position;
 		Eigen::Vector3d _plate_rpy;
+		float _plate_radius;
 
 		std::vector<double> _tsol;
 		std::ofstream _outFile;
@@ -157,7 +161,8 @@ KUKA_CONTROL::KUKA_CONTROL() {
 	_jv_pub = _nh.advertise<std_msgs::Float64MultiArray>("/iiwa/jointsVelCommand", 1);
 	_h_pub = _nh.advertise<std_msgs::Float64MultiArray>("/iiwa/h", 1);
 	_tag_sub = _nh.subscribe("/kuka/camera/tag_pose", 0, &KUKA_CONTROL::artag_cb, this);  
-	
+	_plate_sub = _nh.subscribe("/gazebo/model_states", 10, &KUKA_CONTROL::modelStatesCallback, this);
+
 	for(int k=0; k < _Nj; k++){
 		_j_pub[k] = _nh.advertise<std_msgs::Float64>("/kuka_iiwa/joint" + to_string(k+1) + "_velocity_controller/command", 0); //rostopic pub /kuka/task_set std_msgs/Int8 '2'
 	}
@@ -185,6 +190,33 @@ KUKA_CONTROL::KUKA_CONTROL() {
 
 
 	_outFile.open("qp_time.csv");
+}
+
+void  KUKA_CONTROL::modelStatesCallback(const gazebo_msgs::ModelStates::ConstPtr& msg)
+{
+	const std::string target_model = "grasp_plate";
+
+	for (std::size_t i = 0; i < msg->name.size(); ++i)
+	{
+		if (msg->name[i] == target_model)
+		{
+			const geometry_msgs::Pose& pose = msg->pose[i];
+
+			ROS_INFO_THROTTLE(1.0,
+				"plate pose | position: [%.3f, %.3f, %.3f] orientation: [%.3f, %.3f, %.3f, %.3f]",
+				pose.position.x,
+				pose.position.y,
+				pose.position.z,
+				pose.orientation.x,
+				pose.orientation.y,
+				pose.orientation.z,
+				pose.orientation.w);
+
+			return;
+		}
+	}
+
+	ROS_WARN_THROTTLE(5.0, "Model 'plate' not found in /gazebo/model_states");
 }
 
 bool KUKA_CONTROL::init_model(){
@@ -227,6 +259,7 @@ bool KUKA_CONTROL::init_model(){
 	vector<float> plate_rpy;
 	_nh.getParam("plate_position", plate_position);
 	_nh.getParam("plate_rpy", plate_rpy);
+	_nh.getParam("plate_radius", _plate_radius);
 
 	for(int i=0; i<3; i++){
 		_plate_position(i) = plate_position[i];
@@ -354,7 +387,7 @@ cbf KUKA_CONTROL::cbf_goto_z_3link(const float &d3z){
 	return cbf3z;
 }
 
-cbf KUKA_CONTROL::cbf_keep_ee_horizontal(){
+cbf KUKA_CONTROL::cbf_keep_ee_z_horizontal(){
 
 	cbf cbfEEhor;
 	cbfEEhor.dhdq.resize(_Nj);
@@ -371,6 +404,30 @@ cbf KUKA_CONTROL::cbf_keep_ee_horizontal(){
 	cbfEEhor.dhdq =  -2* Eigen::Vector3d(-ez(1)*z(2) + ez(2)*z(1), 
 								          ez(0)*z(2) - ez(2)*z(0),
 										 -ez(0)*z(1) + ez(1)*z(0)).transpose()*omegaJ;
+
+	// ------------------------------------------------------------------------------
+
+	return cbfEEhor;
+}
+
+
+cbf KUKA_CONTROL::cbf_keep_ee_x_horizontal(){
+
+	cbf cbfEEhor;
+	cbfEEhor.dhdq.resize(_Nj);
+	Eigen::Vector3d x(_Te.M.UnitX()(0), _Te.M.UnitX()(1), _Te.M.UnitX()(2));
+
+	cbfEEhor.h = -(x.squaredNorm() + 1 -2* _Te.M.UnitX()(2));   // -(z - [0,0,1]')'(z - [0,0,1]')
+	
+	Eigen::MatrixXd omegaJ = _J.block(3,0,3,_Nj);
+
+
+	Eigen::Vector3d ex;
+	ex = x - Eigen::Vector3d(0,0,1);
+
+	cbfEEhor.dhdq =  -2* Eigen::Vector3d(-ex(1)*x(2) + ex(2)*x(1), 
+								          ex(0)*x(2) - ex(2)*x(0),
+										 -ex(0)*x(1) + ex(1)*x(0)).transpose()*omegaJ;
 
 	// ------------------------------------------------------------------------------
 
@@ -585,7 +642,7 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 				{	
 					Eigen::Vector3d dpe(0.3, 0.2, 0.8);
 					c1 = cbf_goto_point(dpe);
-					c2 = cbf_keep_ee_horizontal();//cbf_vision();
+					c2 = cbf_keep_ee_x_horizontal();//cbf_vision();
 					c3.h = 0;
 					c3.dhdq.resize(_Nj);
 					c3.dhdq.setZero();
@@ -644,7 +701,7 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 				case 5:   // eeHoriz < eePoint2
 				{
 					Eigen::Vector3d dpe2(0.3, -0.2, 0.7);
-					c1 = cbf_keep_ee_horizontal();
+					c1 = cbf_keep_ee_x_horizontal();
 					c2 = cbf_goto_point(dpe2);
 					c3.h = 0;
 					c3.dhdq.resize(_Nj);
@@ -667,7 +724,7 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 					plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(2), Eigen::Vector3d::UnitZ()));
 					
 					
-					c1 = cbf_approach_grasp_plate(plateTf, 0.25);
+					c1 = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.025);
 					c2.h = 0;
 					c2.dhdq.resize(_Nj);
 					c2.dhdq.setZero();
@@ -691,8 +748,8 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 					plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(1), Eigen::Vector3d::UnitY()));
 					plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(2), Eigen::Vector3d::UnitZ()));
 
-					c1 = cbf_avoid_sphere(_plate_position, 0.2);
-					c2 = cbf_approach_grasp_plate(plateTf, 0.2);
+					c1 = cbf_avoid_sphere(_plate_position, 0.1);
+					c2 = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.01);
 					c3.h = 0;
 					c3.dhdq.resize(_Nj);
 					c3.dhdq.setZero();
