@@ -29,8 +29,8 @@
 #include <cstdlib>
 #include <numeric>
 #include <fstream> 
- #include <iomanip>
-#include "qp_utils.hpp"
+#include <iomanip>
+#include "qp_utils_gripper.hpp"
 
 
 #define STACK 1
@@ -68,7 +68,7 @@ class KUKA_CONTROL {
 		cbf cbf_keep_ee_z_horizontal();
 		cbf cbf_keep_ee_x_horizontal();
 		cbf cbf_approach_grasp_plate(Affine3d plateTf, float r);
-		cbf cbf_avoid_sphere(Vector3d center, float radius);
+		cbf cbf_avoid_plate(Affine3d plateTf, Vector3d lengths);
 		void cbf_joint_limits(vector<cbf> &cbfjl);
 		void taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float64MultiArray & h);
 		void solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, int taskset, Vector7d& u);
@@ -202,21 +202,21 @@ void  KUKA_CONTROL::modelStatesCallback(const gazebo_msgs::ModelStates::ConstPtr
 		{
 			const geometry_msgs::Pose& pose = msg->pose[i];
 
-			ROS_INFO_THROTTLE(1.0,
-				"plate pose | position: [%.3f, %.3f, %.3f] orientation: [%.3f, %.3f, %.3f, %.3f]",
-				pose.position.x,
-				pose.position.y,
-				pose.position.z,
-				pose.orientation.x,
-				pose.orientation.y,
-				pose.orientation.z,
-				pose.orientation.w);
+			// ROS_INFO_THROTTLE(1.0,
+			// 	"plate pose | position: [%.3f, %.3f, %.3f] orientation: [%.3f, %.3f, %.3f, %.3f]",
+			// 	pose.position.x,
+			// 	pose.position.y,
+			// 	pose.position.z,
+			// 	pose.orientation.x,
+			// 	pose.orientation.y,
+			// 	pose.orientation.z,
+			// 	pose.orientation.w);
 
 			return;
 		}
 	}
 
-	ROS_WARN_THROTTLE(5.0, "Model 'plate' not found in /gazebo/model_states");
+	//ROS_WARN_THROTTLE(5.0, "Model 'plate' not found in /gazebo/model_states");
 }
 
 bool KUKA_CONTROL::init_model(){
@@ -284,6 +284,9 @@ bool KUKA_CONTROL::set_qp(){
 		dflt = true;
 	}else{
 		ROS_INFO("Parameters loaded");
+		std::cout << "gamma: " << _gamma << std::endl;
+		std::cout << "lu: " << _lu << std::endl;
+		std::cout << "ldelta: " << _ldelta << std::endl;
 	}
 	return dflt;
 }
@@ -444,70 +447,105 @@ cbf KUKA_CONTROL::cbf_approach_grasp_plate(Affine3d plateTf, float r){
 	Eigen::Vector3d p(_T_gripper.p.x(), _T_gripper.p.y(), _T_gripper.p.z()); 
     
 	Eigen::Vector3d p_plate = plateTf.inverse() * p;
-
+	Eigen::Vector3d plate_center = plateTf.translation();
 
 	Eigen::Vector3d plate_n = plateTf.rotation().col(2); // plate normal vector (z-axis of the plate frame)
 
 	const Eigen::Matrix3d W = (Eigen::Vector3d(1.0, 1.0, 1.0)).asDiagonal(); // wx, wy, wz
-	double ee_r = p_plate.transpose() * W * p_plate;
-	
-	// cbfEEplate.h = -(ee_r - r*r )  - (y - plate_n).squaredNorm();
+
 	
 	Eigen::MatrixXd omegaJ = _J_gripper.block(3,0,3,_Nj);
-
+	Eigen::MatrixXd Jp = plateTf.rotation()* _J_gripper.block(0,0,3,_Nj);
 	Eigen::Vector2d p_plate_xy(p_plate(0), p_plate(1));
 
 	Eigen::Vector3d o_ey, o_ez;
 	o_ey = y - plate_n;
 
-	// cbfEEplate.dhdq =  -2*p_plate.transpose()*W*_J_gripper.block(0,0,3,_Nj) -2* Eigen::Vector3d(-o_ey(1)*y(2) + o_ey(2)*y(1), 
-	// 																						        o_ey(0)*y(2) - o_ey(2)*y(0),
-	// 																						       -o_ey(0)*y(1) + o_ey(1)*y(0)).transpose()*omegaJ;
-    Eigen::Matrix<double,3,3> skew_s = utilities::skew(plate_n);
+
 	Eigen::Matrix<double,3,3> P = Eigen::Matrix<double,3,3>::Identity(3,3) - plate_n*plate_n.transpose();
-	Eigen::Matrix<double,3,6> L = Eigen::Matrix<double,3,6>::Zero(3,6);
-	L.block(0,0,3,3) = -(1/(plateTf.translation() - p).norm())*P;
-	L.block(0,3,3,3) = skew_s;
+
 	Eigen::Vector3d z_d;
 	
 	z_d = P*(plateTf.translation() - p)/(plateTf.translation() - p).norm();
 
 	o_ez = z - z_d;
 
-	cbfEEplate.h = -(p_plate_xy.squaredNorm() - r*r)*(p_plate_xy.squaredNorm() - r*r)
-				   -(p_plate(2)*p_plate(2))*(p_plate(2)*p_plate(2))
+	// cbfEEplate.h = -(p_plate_xy.squaredNorm() - r*r)*(p_plate_xy.squaredNorm() - r*r)
+	// 			   -(p_plate(2)*p_plate(2))*(p_plate(2)*p_plate(2))
+	// 			   -o_ey.squaredNorm()
+	// 			   -o_ez.squaredNorm(); //(z-z_d).dot((z-z_d));
+
+	
+	// cbfEEplate.dhdq = -4*(p_plate_xy.squaredNorm() - r*r)*(p - plateTf.translation()).head<2>().transpose()*_J_gripper.block(0,0,2,_Nj) 
+	// 				  -4*(p_plate(2)*p_plate(2))*(p(2) -  plate_center(2))*_J_gripper.block(2,0,1,_Nj) 
+	// 				  -2*Eigen::Vector3d(-o_ey(1)*y(2) + o_ey(2)*y(1), 
+	// 			    				      o_ey(0)*y(2) - o_ey(2)*y(0),
+	// 									 -o_ey(0)*y(1) + o_ey(1)*y(0)).transpose()*omegaJ
+	// 				  -2* Eigen::Vector3d(-o_ez(1)*z(2) + o_ez(2)*z(1), 
+	// 			     				       o_ez(0)*z(2) - o_ez(2)*z(0),
+	// 									  -o_ez(0)*z(1) + o_ez(1)*z(0)).transpose()*omegaJ
+	// 			      -2*(z -z_d).transpose()*P*(1/(plateTf.translation() - p).norm())*_J_gripper.block(0,0,3,_Nj); // gradient of the term (z-z_d).dot((z-z_d)) w.r.t. q								   
+
+
+	// cbfEEplate.h = -(p_plate_xy.squaredNorm() - r*r)
+	// 			   -(p_plate(2)*p_plate(2))
+	// 			   -o_ey.squaredNorm()
+	// 			   -o_ez.squaredNorm(); //(z-z_d).dot((z-z_d));
+
+	// cbfEEplate.dhdq = -2*(p - plateTf.translation()).head<2>().transpose()*_J_gripper.block(0,0,2,_Nj) 
+	// 				  -2*(p(2) -  plate_center(2))*_J_gripper.block(2,0,1,_Nj) 
+	// 				  -2*Eigen::Vector3d(-o_ey(1)*y(2) + o_ey(2)*y(1), 
+	// 			    				      o_ey(0)*y(2) - o_ey(2)*y(0),
+	// 									 -o_ey(0)*y(1) + o_ey(1)*y(0)).transpose()*omegaJ
+	// 				  -2* Eigen::Vector3d(-o_ez(1)*z(2) + o_ez(2)*z(1), 
+	// 			     				       o_ez(0)*z(2) - o_ez(2)*z(0),
+	// 									  -o_ez(0)*z(1) + o_ez(1)*z(0)).transpose()*omegaJ
+	// 			      -2*(z -z_d).transpose()*P*(1/(plateTf.translation() - p).norm())*_J_gripper.block(0,0,3,_Nj); // gradient of the term (z-z_d).dot((z-z_d)) w.r.t. q								   
+
+	// ------------------------------------------------------------------------------
+	cbfEEplate.h = -(p_plate_xy.norm() - r)*(p_plate_xy.norm() - r)
+				   -(p_plate(2)*p_plate(2))
 				   -o_ey.squaredNorm()
 				   -o_ez.squaredNorm(); //(z-z_d).dot((z-z_d));
 
-	cbfEEplate.dhdq = -4*(p_plate_xy.squaredNorm() - r*r)*p_plate_xy.transpose()*_J_gripper.block(0,0,2,_Nj) 
-					  -4*(p_plate(2)*p_plate(2))*p_plate(2)*_J_gripper.block(2,0,1,_Nj) 
+	cbfEEplate.dhdq = -4*(p_plate_xy.norm() - r)*(1/p_plate_xy.norm())*(p - plateTf.translation()).head<2>().transpose()*_J_gripper.block(0,0,2,_Nj) 
+					  -2*(p(2) -  plate_center(2))*_J_gripper.block(2,0,1,_Nj) 
 					  -2*Eigen::Vector3d(-o_ey(1)*y(2) + o_ey(2)*y(1), 
 				    				      o_ey(0)*y(2) - o_ey(2)*y(0),
 										 -o_ey(0)*y(1) + o_ey(1)*y(0)).transpose()*omegaJ
-					   -2* Eigen::Vector3d(-o_ez(1)*z(2) + o_ez(2)*z(1), 
-				    				        o_ez(0)*z(2) - o_ez(2)*z(0),
-										   -o_ez(0)*z(1) + o_ez(1)*z(0)).transpose()*omegaJ
-					   -2*(z -z_d).transpose()*P*(1/(plateTf.translation() - p).norm())*_J_gripper.block(0,0,3,_Nj); // gradient of the term (z-z_d).dot((z-z_d)) w.r.t. q								   
-	// ------------------------------------------------------------------------------
+					  -2* Eigen::Vector3d(-o_ez(1)*z(2) + o_ez(2)*z(1), 
+				     				       o_ez(0)*z(2) - o_ez(2)*z(0),
+										  -o_ez(0)*z(1) + o_ez(1)*z(0)).transpose()*omegaJ
+				      -2*(z -z_d).transpose()*P*(1/(plateTf.translation() - p).norm())*_J_gripper.block(0,0,3,_Nj); // gradient of the term (z-z_d).dot((z-z_d)) w.r.t. q								   
 
 	return cbfEEplate;
 }
 
-cbf KUKA_CONTROL::cbf_avoid_sphere(Vector3d center, float radius){
+cbf KUKA_CONTROL::cbf_avoid_plate(Affine3d plateTf, Vector3d lengths){
 
-	cbf cbf_sphere;
-	cbf_sphere.dhdq.resize(_Nj);
-	Eigen::Vector3d p(_T_gripper.p.x(), _T_gripper.p.y(), _T_gripper.p.z());
+	cbf cbf_avoid;
+	cbf_avoid.dhdq.resize(_Nj);
+	Vector3d p(_T_gripper.p.x(), _T_gripper.p.y(), _T_gripper.p.z());
 
-	cbf_sphere.h = -(p - center).squaredNorm() + radius*radius;   
+	Eigen::Vector3d p_plate = plateTf.inverse() * p;
+	Eigen::Vector3d center = plateTf.translation();
+
+	Eigen::Vector3d inv_lengths = lengths.cwiseInverse();
+	Eigen::Vector3d inv_lengths2 = inv_lengths.cwiseProduct(inv_lengths);
+	Eigen::Matrix3d L2 = inv_lengths2.asDiagonal(); // scaling matrix for the ellipsoid axes
+
+	double d2_scaled = (p - center).transpose() *plateTf.rotation().transpose()* L2 * plateTf.rotation() * (p - center);
 	
+	cbf_avoid.h = (d2_scaled - 1.0);
 	
-	Eigen::MatrixXd Jp = _J_gripper.block(0,0,3,_Nj);
+	// Jacobian computation: dh/dq
+	Eigen::MatrixXd Jg = _J_gripper.block(0,0,3,_Nj);
+	
+	cbf_avoid.dhdq = 2*(p - center).transpose()*plateTf.rotation().transpose()* L2 * Jg;
 
-	cbf_sphere.dhdq = -2*(p-center).transpose()*Jp;
-
-	return cbf_sphere;
+	return cbf_avoid;
 }
+
 
 cbf KUKA_CONTROL::cbf_vision(){
 
@@ -630,6 +668,7 @@ void KUKA_CONTROL::solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, i
 
 void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float64MultiArray & h){
 	
+	cbf c0;
 	cbf c1;
 	cbf c2;
 	cbf c3;
@@ -637,145 +676,149 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 	cbfs = {};
 	cbf_joint_limits(cbfs); 
 
+	c0.h = 0;
+	c0.dhdq.resize(_Nj);
+	c0.dhdq.setZero();
+
+	Eigen::Affine3d plateTf = Eigen::Affine3d::Identity();
+	plateTf.translate(_plate_position);  
+	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(0), Eigen::Vector3d::UnitX()));
+	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(1), Eigen::Vector3d::UnitY()));
+	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(2), Eigen::Vector3d::UnitZ()));
+	c0 = cbf_avoid_plate(plateTf, Eigen::Vector3d(1.2*_plate_radius, 1.2*_plate_radius, 1.2*0.01));
+	cbfs.push_back(c0);
+
 	switch(taskSet){
-				case 1:    //  eePoint < eeHoriz  //  eePoint < vision   
-				{	
-					Eigen::Vector3d dpe(0.3, 0.2, 0.8);
-					c1 = cbf_goto_point(dpe);
-					c2 = cbf_keep_ee_x_horizontal();//cbf_vision();
-					c3.h = 0;
-					c3.dhdq.resize(_Nj);
-					c3.dhdq.setZero();
-					cbfs.push_back(c1);
-					cbfs.push_back(c2);    
-					cbfs.push_back(c3);  
-					
-					h.data[0] = c1.h;
-					h.data[1] = c2.h;
-					h.data[2] = c3.h;
-				}break;
-				case 2:   //  eePoint < 3linkz < vision
-				{
-					Eigen::Vector3d dpe(0.3, 0.2, 0.8);
-					c1 = cbf_goto_point(dpe);
-					c2 = cbf_goto_z_3link(0.45);
-					c3 = cbf_vision();
-					cbfs.push_back(c1);
-					cbfs.push_back(c2);
-					cbfs.push_back(c3);
-	
-					h.data[0] = c1.h;
-					h.data[1] = c2.h;
-					h.data[2] = c3.h;
-				}break;
-				case 3:   //  eePoint1 < eePoint2 < vision
-				{
-					Eigen::Vector3d dpe(0.3, 0.2, 0.8);
-					Eigen::Vector3d dpe2(0.3, -0.2, 0.7);
-					c1 = cbf_goto_point(dpe);
-					c2 = cbf_goto_point(dpe2);
-					c3 = cbf_vision();
-					cbfs.push_back(c1);
-					cbfs.push_back(c2);
-					cbfs.push_back(c3);
+		case 1:    //  eePoint < eeHoriz  //  eePoint < vision   
+		{	
+			Eigen::Vector3d dpe(0.3, 0.2, 0.8);
+			c1 = cbf_goto_point(dpe);
+			c2 = cbf_keep_ee_x_horizontal();//cbf_vision();
+			c3.h = 0;
+			c3.dhdq.resize(_Nj);
+			c3.dhdq.setZero();
+			cbfs.push_back(c1);
+			cbfs.push_back(c2);    
+			cbfs.push_back(c3);  
+			
+			h.data[0] = c1.h;
+			h.data[1] = c2.h;
+			h.data[2] = c3.h;
+		}break;
+		case 2:   //  eePoint < 3linkz < vision
+		{
+			Eigen::Vector3d dpe(0.3, 0.2, 0.8);
+			c1 = cbf_goto_point(dpe);
+			c2 = cbf_goto_z_3link(0.45);
+			c3 = cbf_vision();
+			cbfs.push_back(c1);
+			cbfs.push_back(c2);
+			cbfs.push_back(c3);
 
-					h.data[0] = c1.h;
-					h.data[1] = c2.h;
-					h.data[2] = c3.h;
-				}break;
-				case 4:   // eePoint2 < eePoint1 < vision
-				{
-					Eigen::Vector3d dpe(0.3, 0.2, 0.8);
-					Eigen::Vector3d dpe2(0.3, -0.2, 0.7);
-					c1 = cbf_goto_point(dpe2);
-					c2 = cbf_goto_point(dpe);
-					c3 = cbf_vision();
-					cbfs.push_back(c1);
-					cbfs.push_back(c2);
-					cbfs.push_back(c3);					
+			h.data[0] = c1.h;
+			h.data[1] = c2.h;
+			h.data[2] = c3.h;
+		}break;
+		case 3:   //  eePoint1 < eePoint2 < vision
+		{
+			Eigen::Vector3d dpe(0.3, 0.2, 0.8);
+			Eigen::Vector3d dpe2(0.3, -0.2, 0.7);
+			c1 = cbf_goto_point(dpe);
+			c2 = cbf_goto_point(dpe2);
+			c3 = cbf_vision();
+			cbfs.push_back(c1);
+			cbfs.push_back(c2);
+			cbfs.push_back(c3);
 
-					h.data[0] = c1.h;
-					h.data[1] = c2.h;
-					h.data[2] = c3.h;
-				}break;
-				case 5:   // eeHoriz < eePoint2
-				{
-					Eigen::Vector3d dpe2(0.3, -0.2, 0.7);
-					c1 = cbf_keep_ee_x_horizontal();
-					c2 = cbf_goto_point(dpe2);
-					c3.h = 0;
-					c3.dhdq.resize(_Nj);
-					c3.dhdq.setZero();
+			h.data[0] = c1.h;
+			h.data[1] = c2.h;
+			h.data[2] = c3.h;
+		}break;
+		case 4:   // eePoint2 < eePoint1 < vision
+		{
+			Eigen::Vector3d dpe(0.3, 0.2, 0.8);
+			Eigen::Vector3d dpe2(0.3, -0.2, 0.7);
+			c1 = cbf_goto_point(dpe2);
+			c2 = cbf_goto_point(dpe);
+			c3 = cbf_vision();
+			cbfs.push_back(c1);
+			cbfs.push_back(c2);
+			cbfs.push_back(c3);					
 
-					cbfs.push_back(c1);
-					cbfs.push_back(c2);    
-					cbfs.push_back(c3);  
-					
-					h.data[0] = c1.h;
-					h.data[1] = c2.h;
-					h.data[2] = c3.h;
-				}break;
-				case 6:
-				{
-					Eigen::Affine3d plateTf = Eigen::Affine3d::Identity();
-					plateTf.translate(_plate_position);  
-					plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(0), Eigen::Vector3d::UnitX()));
-					plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(1), Eigen::Vector3d::UnitY()));
-					plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(2), Eigen::Vector3d::UnitZ()));
-					
-					
-					c1 = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.025);
-					c2.h = 0;
-					c2.dhdq.resize(_Nj);
-					c2.dhdq.setZero();
-					c3.h = 0;
-					c3.dhdq.resize(_Nj);
-					c3.dhdq.setZero();
+			h.data[0] = c1.h;
+			h.data[1] = c2.h;
+			h.data[2] = c3.h;
+		}break;
+		case 5:   // eeHoriz < eePoint2
+		{
+			Eigen::Vector3d dpe2(0.8, -0.2, 0.7);
+			c1 = cbf_keep_ee_x_horizontal();
+			c2 = cbf_goto_point(dpe2);
+			c3.h = 0;
+			c3.dhdq.resize(_Nj);
+			c3.dhdq.setZero();
 
-					cbfs.push_back(c1);
-					cbfs.push_back(c2);    
-					cbfs.push_back(c3);  
-					
-					h.data[0] = c1.h;
-					h.data[1] = c2.h;
-					h.data[2] = c3.h;
-				}break;
-				case 7:
-				{
-					Eigen::Affine3d plateTf = Eigen::Affine3d::Identity();
-					plateTf.translate(_plate_position);  
-					plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(0), Eigen::Vector3d::UnitX()));
-					plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(1), Eigen::Vector3d::UnitY()));
-					plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(2), Eigen::Vector3d::UnitZ()));
+			cbfs.push_back(c1);
+			cbfs.push_back(c2);    
+			cbfs.push_back(c3);  
+			
+			h.data[0] = c1.h;
+			h.data[1] = c2.h;
+			h.data[2] = c3.h;
+		}break;
+		case 6:
+		{	
+			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.025);
+			c2.h = 0;
+			c2.dhdq.resize(_Nj);
+			c2.dhdq.setZero();
+			c3.h = 0;
+			c3.dhdq.resize(_Nj);
+			c3.dhdq.setZero();
 
-					c1 = cbf_avoid_sphere(_plate_position, 0.1);
-					c2 = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.01);
-					c3.h = 0;
-					c3.dhdq.resize(_Nj);
-					c3.dhdq.setZero();
+			cbfs.push_back(c1);
+			cbfs.push_back(c2);    
+			cbfs.push_back(c3);  
+			
+			h.data[0] = c1.h;
+			h.data[1] = c2.h;
+			h.data[2] = c3.h;
+		}break;
+		case 7:
+		{
+			Eigen::Vector3d dpe(0.8, 0.1, 0.7);
+				
+			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.02);
+			c2.h = 0;
+			c2.dhdq.resize(_Nj);
+			c2.dhdq.setZero();
+			//c2 = cbf_goto_point(dpe);
+			c3.h = 0;
+			c3.dhdq.resize(_Nj);
+			c3.dhdq.setZero();
 
-					cbfs.push_back(c1);
-					cbfs.push_back(c2);    
-					cbfs.push_back(c3);  
-					
-					h.data[0] = c1.h;
-					h.data[1] = c2.h;
-					h.data[2] = c3.h;
-				}break;
-				default:
-					c1.h = 0;
-					c1.dhdq.resize(_Nj);
-					c1.dhdq.setZero();
-					cbfs.push_back(c1);
-					cbfs.push_back(c1);
-					cbfs.push_back(c1);	
-					
-					h.data.resize(3);
-					h.data[0] = 0;
-					h.data[1] = 0;
-					h.data[2] = 0;
-				break;
-			}
+			cbfs.push_back(c1);
+			cbfs.push_back(c2);    
+			cbfs.push_back(c3);  
+			
+			h.data[0] = c1.h;
+			h.data[1] = c2.h;
+			h.data[2] = c3.h;
+		}break;
+		default:
+			c1.h = 0;
+			c1.dhdq.resize(_Nj);
+			c1.dhdq.setZero();
+			cbfs.push_back(c1);
+			cbfs.push_back(c1);
+			cbfs.push_back(c1);	
+			
+			h.data.resize(3);
+			h.data[0] = 0;
+			h.data[1] = 0;
+			h.data[2] = 0;
+		break;
+	}
 }
 
 void KUKA_CONTROL::ctrl_loop(){

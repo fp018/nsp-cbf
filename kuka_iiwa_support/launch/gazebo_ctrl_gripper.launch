@@ -9,7 +9,7 @@
 	<arg name="headless" default="false"/>
 	<arg name="debug" default="false"/>
 	<arg name="simulation" default="true"/>
-	<arg name="launch_rviz" default="true"/>
+	<arg name="launch_rviz" default="false"/>
 	<arg name="rviz_config" default="$(find kuka_iiwa_support)/rviz/gripper.rviz"/>
 	
 	<!-- We resume the logic in empty_world.launch -->

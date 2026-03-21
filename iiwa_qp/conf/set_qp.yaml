@@ -1,7 +1,7 @@
 
 gamma: 0.75
-lu: 1
-ldelta: 10000
+lu: 0.1
+ldelta: 100
 
 k1: 1
 k2: 1
