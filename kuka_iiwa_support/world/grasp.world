@@ -146,8 +146,8 @@
     <plugin name="gazebo_ros_api_plugin" filename="libgazebo_ros_api_plugin.so"/>
     <plugin name="model_attachment_plugin" filename="libboeing_gazebo_model_attachment_plugin.so"/>
 
-    <!-- <model name='grasp_plate'>
-      <pose>0.8 -0.1 0.6 -1.0 0 0</pose>
+    <model name='plate'>
+      <pose>-0.2 0.5 0.6 -1.0 0 0</pose>
       <static>false</static>
       <link name='plate_link'>
         <inertial>
@@ -161,53 +161,6 @@
             <izz>0.0006</izz>
           </inertia>
         </inertial>
-        <collision name='collision'>
-          <geometry>
-            <cylinder>
-              <radius>0.2</radius>
-              <length>0.01</length>
-            </cylinder>
-          </geometry>
-          <surface>
-            <friction>
-              <ode>
-                <mu>100</mu>
-                <mu2>100</mu2>
-              </ode>
-            </friction>
-          </surface>
-        </collision>
-        <visual name='visual'>
-          <geometry>
-            <cylinder>
-              <radius>0.2</radius>
-              <length>0.01</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.8 0.2 0.2 1</ambient>
-            <diffuse>0.8 0.2 0.2 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model> -->
-    <model name='grasp_plate'>
-      <pose>0.8 -0.1 0.6 -1.0 0 0</pose>
-      <static>false</static>
-
-      <link name='plate_link'>
-        <inertial>
-          <mass>0.2</mass>
-          <inertia>
-            <ixx>0.0003</ixx>
-            <ixy>0</ixy>
-            <ixz>0</ixz>
-            <iyy>0.0003</iyy>
-            <iyz>0</iyz>
-            <izz>0.0006</izz>
-          </inertia>
-        </inertial>
-
         <!-- <collision name='plate_collision'>
           <geometry>
             <cylinder>
@@ -224,7 +177,6 @@
             </friction>
           </surface>
         </collision> -->
-
         <visual name='plate_visual'>
           <geometry>
             <cylinder>
@@ -238,10 +190,8 @@
           </material>
         </visual>
       </link>
-
       <link name='plate_grasp_link'>
         <pose relative_to='plate_link'>-0.225 -0.005 0.00 0 1.57079632679 0</pose>
-
         <inertial>
           <mass>0.01</mass>
           <inertia>
@@ -253,7 +203,6 @@
             <izz>1e-6</izz>
           </inertia>
         </inertial>
-
         <!-- <collision name='grasp_collision'>
           <geometry>
             <sphere>
@@ -261,7 +210,6 @@
             </sphere>
           </geometry>
         </collision> -->
-
         <visual name='grasp_visual'>
           <geometry>
             <sphere>
@@ -274,11 +222,12 @@
           </material>
         </visual>
       </link>
-
       <joint name='plate_fixed_joint' type='fixed'>
         <parent>plate_link</parent>
         <child>plate_grasp_link</child>
       </joint>
     </model> 
+
+
   </world>
 </sdf>

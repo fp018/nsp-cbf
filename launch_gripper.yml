@@ -27,7 +27,7 @@ windows:
     - shell_command:
         - cd /catkin_ws && source devel/setup.bash
         - sleep 5
-        - roslaunch wsg50_simulation wsg_50_teleop.launch
-        #- rosrun plotjuggler plotjuggler
+        #- roslaunch wsg50_simulation wsg_50_teleop.launch
+        - rosrun plotjuggler plotjuggler
 
 

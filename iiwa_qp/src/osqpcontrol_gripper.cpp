@@ -31,7 +31,7 @@
 #include <fstream> 
 #include <iomanip>
 #include "qp_utils_gripper.hpp"
-
+#include <boeing_gazebo_model_attachment_plugin/Attach.h>
 
 #define STACK 1
 #define DQPINTRP 1
@@ -39,6 +39,7 @@
 #define SOL_TIME_EVAL 0
 
 #define dt 0.001
+
 
 using namespace std;
 class KUKA_CONTROL {
@@ -56,11 +57,12 @@ class KUKA_CONTROL {
 		void modelStatesCallback(const gazebo_msgs::ModelStates::ConstPtr& msg);
 
 		void update_dirkin(Eigen::VectorXd &q_in); 
-		KDL::Jacobian Jacobian(KDL::JntArray* q_in);
-		KDL::Jacobian Jacobian3(KDL::JntArray* q_in);
+		bool computeJacobian(KDL::ChainJntToJacSolver& solver,const KDL::JntArray& q, KDL::Jacobian jac, Eigen::MatrixXd& out, const std::string& name);
 		
 		void ctrl_loop();
 		void task_set_input();
+		void grasp_sm(int &taskSet);
+		bool request_attach_plate();
 
 		cbf cbf_goto_point(const Eigen::Vector3d &dpe);
 		cbf cbf_goto_z_3link(const float &d3z);
@@ -68,7 +70,7 @@ class KUKA_CONTROL {
 		cbf cbf_keep_ee_z_horizontal();
 		cbf cbf_keep_ee_x_horizontal();
 		cbf cbf_approach_grasp_plate(Affine3d plateTf, float r);
-		cbf cbf_avoid_plate(Affine3d plateTf, Vector3d lengths);
+		cbf cbf_avoid_plate(const Affine3d linkTf, const MatrixXd J, const Affine3d plateTf, const Vector3d lengths);
 		void cbf_joint_limits(vector<cbf> &cbfjl);
 		void taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float64MultiArray & h);
 		void solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, int taskset, Vector7d& u);
@@ -90,27 +92,35 @@ class KUKA_CONTROL {
 
 		KDL::JntArray *_q_in;
 		KDL::JntArray *_q_3in;
-		KDL::JntArray *_dq_in;
-		KDL::JntArray *_dq_3in;
-		KDL::JntArray *_q_kdl;
-		KDL::JntArray *_dq_kdl;
+		KDL::JntArray *_q_gripper;
+
 
 		KDL::Tree iiwa_tree;
 		KDL::ChainFkSolverPos_recursive *_fksolver; //Forward position solver
 		KDL::ChainFkSolverPos_recursive *_fk3solver; //Forward 3link position solver
 		KDL::ChainFkSolverPos_recursive *_fk_gripper_solver;
+		KDL::ChainFkSolverPos_recursive *_fk_gripper_lf_solver;
+		KDL::ChainFkSolverPos_recursive *_fk_gripper_rf_solver;
 
 		KDL::ChainJntToJacSolver *_J_solver;
 		KDL::ChainJntToJacSolver *_J3_solver;
 		KDL::ChainJntToJacSolver *_J_gripper_solver;
+		KDL::ChainJntToJacSolver *_J_gripper_lf_solver;
+		KDL::ChainJntToJacSolver *_J_gripper_rf_solver;
+
 		KDL::ChainDynParam *_dyn_param;
 		KDL::Chain _k_chain;
 		KDL::Chain _k3_chain;
 		KDL::Chain _k_gripper_chain;
+		KDL::Chain _k_gripper_lf_chain;
+		KDL::Chain _k_gripper_rf_chain;
 
 		KDL::Frame _Te;
 		KDL::Frame _T3;
 		KDL::Frame _T_gripper;
+		KDL::Frame _T_gripper_lf;
+		KDL::Frame _T_gripper_rf;
+
 		KDL::FrameVel _dirkin_out;
 		KDL::FrameVel _dirkin_out3;
 
@@ -118,6 +128,8 @@ class KUKA_CONTROL {
 		Eigen::MatrixXd _J;
 		Eigen::MatrixXd _J3;
 		Eigen::MatrixXd _J_gripper;
+		Eigen::MatrixXd _J_gripper_lf;
+		Eigen::MatrixXd _J_gripper_rf;
 
 		OsqpEigen::Solver _solver;
 		OsqpEigen::Solver _solverprv;
@@ -138,9 +150,13 @@ class KUKA_CONTROL {
 		ros::Time _latest_tag;
 
 		double _kp;
+		Eigen::Vector3d _p1;
+		Eigen::Vector3d _p2;
 		Eigen::Vector3d _plate_position;
 		Eigen::Vector3d _plate_rpy;
 		float _plate_radius;
+
+		int _state;
 
 		std::vector<double> _tsol;
 		std::ofstream _outFile;
@@ -164,22 +180,29 @@ KUKA_CONTROL::KUKA_CONTROL() {
 	_plate_sub = _nh.subscribe("/gazebo/model_states", 10, &KUKA_CONTROL::modelStatesCallback, this);
 
 	for(int k=0; k < _Nj; k++){
-		_j_pub[k] = _nh.advertise<std_msgs::Float64>("/kuka_iiwa/joint" + to_string(k+1) + "_velocity_controller/command", 0); //rostopic pub /kuka/task_set std_msgs/Int8 '2'
+		//_j_pub[k] = _nh.advertise<std_msgs::Float64>("/kuka_iiwa/joint" + to_string(k+1) + "_velocity_controller/command", 0); //rostopic pub /kuka/task_set std_msgs/Int8 '2'
+		_j_pub[k] = _nh.advertise<std_msgs::Float64>("/kuka_iiwa/joint" + to_string(k+1) + "_position_controller/command", 0);
 	}
 	
 	_q_in = new KDL::JntArray(_Nj);
-	_dq_in = new KDL::JntArray(_Nj);
   	_q_3in = new KDL::JntArray(3);
-	_dq_3in = new KDL::JntArray(3);
+	_q_gripper = new KDL::JntArray(_k_gripper_lf_chain.getNrOfJoints());
 
-	_fksolver = new KDL::ChainFkSolverPos_recursive( _k_chain );
-	_J_solver = new KDL::ChainJntToJacSolver( _k_chain );
+	_fksolver = new KDL::ChainFkSolverPos_recursive( _k_chain);
+	_J_solver = new KDL::ChainJntToJacSolver( _k_chain);
 
-	_fk3solver = new KDL::ChainFkSolverPos_recursive( _k3_chain );
+	_fk3solver = new KDL::ChainFkSolverPos_recursive( _k3_chain);
 	_J3_solver = new KDL::ChainJntToJacSolver(_k3_chain);
 
-	_fk_gripper_solver = new KDL::ChainFkSolverPos_recursive( _k_gripper_chain );
+	_fk_gripper_solver = new KDL::ChainFkSolverPos_recursive( _k_gripper_chain);
 	_J_gripper_solver = new KDL::ChainJntToJacSolver(_k_gripper_chain);
+
+
+	_fk_gripper_lf_solver = new KDL::ChainFkSolverPos_recursive( _k_gripper_lf_chain);
+	_J_gripper_lf_solver = new KDL::ChainJntToJacSolver(_k_gripper_lf_chain);
+
+	_fk_gripper_rf_solver = new KDL::ChainFkSolverPos_recursive( _k_gripper_rf_chain);
+	_J_gripper_rf_solver = new KDL::ChainJntToJacSolver(_k_gripper_rf_chain);
 
 	_dyn_param = new KDL::ChainDynParam(_k_chain,KDL::Vector(0,0,-9.81));
 
@@ -201,22 +224,9 @@ void  KUKA_CONTROL::modelStatesCallback(const gazebo_msgs::ModelStates::ConstPtr
 		if (msg->name[i] == target_model)
 		{
 			const geometry_msgs::Pose& pose = msg->pose[i];
-
-			// ROS_INFO_THROTTLE(1.0,
-			// 	"plate pose | position: [%.3f, %.3f, %.3f] orientation: [%.3f, %.3f, %.3f, %.3f]",
-			// 	pose.position.x,
-			// 	pose.position.y,
-			// 	pose.position.z,
-			// 	pose.orientation.x,
-			// 	pose.orientation.y,
-			// 	pose.orientation.z,
-			// 	pose.orientation.w);
-
 			return;
 		}
 	}
-
-	//ROS_WARN_THROTTLE(5.0, "Model 'plate' not found in /gazebo/model_states");
 }
 
 bool KUKA_CONTROL::init_model(){
@@ -232,19 +242,29 @@ bool KUKA_CONTROL::init_model(){
 	std::string tip_link = "iiwa_link_7";
 	std::string link3 = "iiwa_link_3";
 	std::string gripper_link = "iiwa_gripper_midpoint";
+	std::string gripper_rf_link = "wsg_50_finger_right";
+	std::string gripper_lf_link = "wsg_50_finger_left";
 
 	if ( !iiwa_tree.getChain(base_link, tip_link, _k_chain) ) return false;
 	if ( !iiwa_tree.getChain(base_link, link3, _k3_chain) ) return false; 
 	if ( !iiwa_tree.getChain(base_link, gripper_link, _k_gripper_chain) ) return false; 
+	if ( !iiwa_tree.getChain(base_link, gripper_lf_link, _k_gripper_lf_chain)) return false; 
+	if ( !iiwa_tree.getChain(base_link, gripper_rf_link, _k_gripper_rf_chain)) return false; 
+
 
 	_Nj = _k_chain.getNrOfJoints();
-	cout<<"Number of joints: "<<_Nj<<endl;
+
 	_J.resize(6,_k_chain.getNrOfJoints());
 	_J3.resize(6,_k3_chain.getNrOfJoints());
 	_J_gripper.resize(6,_k_gripper_chain.getNrOfJoints());
+	_J_gripper_lf.resize(6,_k_gripper_lf_chain.getNrOfJoints());
+	_J_gripper_rf.resize(6,_k_gripper_rf_chain.getNrOfJoints());
+
 	_J = Eigen::MatrixXd::Zero(6,_k_chain.getNrOfJoints());
 	_J3 = Eigen::MatrixXd::Zero(6,_k3_chain.getNrOfJoints());
 	_J_gripper = Eigen::MatrixXd::Zero(6,_k_gripper_chain.getNrOfJoints());
+	_J_gripper_lf = Eigen::MatrixXd::Zero(6,_k_gripper_lf_chain.getNrOfJoints());
+	_J_gripper_rf = Eigen::MatrixXd::Zero(6,_k_gripper_rf_chain.getNrOfJoints());
 
 	_vel.resize(6);
 
@@ -255,6 +275,9 @@ bool KUKA_CONTROL::init_model(){
 	_nh.getParam("q_min", _q_min);
 	_nh.getParam("kp", _kp);
 
+	vector<float> p1, p2;
+	_nh.getParam("p1", p1);
+	_nh.getParam("p2", p2);
 	vector<float> plate_position;
 	vector<float> plate_rpy;
 	_nh.getParam("plate_position", plate_position);
@@ -262,9 +285,13 @@ bool KUKA_CONTROL::init_model(){
 	_nh.getParam("plate_radius", _plate_radius);
 
 	for(int i=0; i<3; i++){
+		_p1(i) = p1[i];
+		_p2(i) = p2[i];
 		_plate_position(i) = plate_position[i];
 		_plate_rpy(i) = plate_rpy[i];
 	}
+	
+	_state = 0;
 
 	return true;
 
@@ -295,8 +322,12 @@ void KUKA_CONTROL::joint_states_cb(const sensor_msgs::JointState& js){
 
 	for(int i=0; i<7; i++ ) {
 		_qfb(i) = js.position[i];
-		_dq_in->data[i] = js.velocity[i];
+		_q_gripper->data[i] = js.position[i];
 	}
+	// Gripper joints
+	for(int i=7; i<9; i++ ) {
+		_q_gripper->data[i] = js.position[i];
+	}	
 
 	_first_js = true;
 	_sync = true;
@@ -328,46 +359,33 @@ void KUKA_CONTROL::update_dirkin(Eigen::VectorXd & q_in){
 	_xe(2) = _Te.p.z();
 
 	_fk3solver->JntToCart(*_q_3in, _T3);
-
 	_fk_gripper_solver->JntToCart(*_q_in, _T_gripper);
+	_fk_gripper_lf_solver->JntToCart(*_q_gripper, _T_gripper_lf);
+	_fk_gripper_rf_solver->JntToCart(*_q_gripper, _T_gripper_rf);
 
 	KDL::Jacobian Jac(_k_chain.getNrOfJoints());
 	KDL::Jacobian Jac3(_k3_chain.getNrOfJoints());
 	KDL::Jacobian Jac_gripper(_k_gripper_chain.getNrOfJoints());
-
-	if( _J_solver->JntToJac(*_q_in, Jac) != KDL::ChainJntToJacSolver::E_NOERROR )
-		cout << "failing in Jacobian computation!" << endl;
-	if( _J3_solver->JntToJac(*_q_3in, Jac3) != KDL::ChainJntToJacSolver::E_NOERROR )
-		cout << "failing in Jacobian3 computation!" << endl;
-	if( _J_gripper_solver->JntToJac(*_q_in, Jac_gripper) != KDL::ChainJntToJacSolver::E_NOERROR )
-		cout << "failing in Jacobian3 computation!" << endl;
-
-	_J = Jac.data;
-	_J3 = Jac3.data;
-	_J_gripper = Jac_gripper.data;
-}
-
-KDL::Jacobian KUKA_CONTROL::Jacobian(KDL::JntArray *q_in){
-
-	KDL::Jacobian Jac(_k_chain.getNrOfJoints());
-
-	if( _J_solver->JntToJac(*q_in, Jac) != KDL::ChainJntToJacSolver::E_NOERROR )
-		cout << "failing in Jacobian computation!" << endl;
-
-	return Jac;
+	KDL::Jacobian Jac_gripper_lf(_k_gripper_lf_chain.getNrOfJoints());
+	KDL::Jacobian Jac_gripper_rf(_k_gripper_rf_chain.getNrOfJoints());
+	
+	computeJacobian(*_J_solver, *_q_in, Jac, _J, "Jacobian");
+	computeJacobian(*_J3_solver, *_q_3in, Jac3, _J3, "Jacobian3");
+	computeJacobian(*_J_gripper_solver, *_q_in, Jac_gripper, _J_gripper, "gripper Jacobian");
+	computeJacobian(*_J_gripper_lf_solver, *_q_gripper, Jac_gripper_lf, _J_gripper_lf, "left finger Jacobian");
+	computeJacobian(*_J_gripper_rf_solver, *_q_gripper, Jac_gripper_rf, _J_gripper_rf, "right finger Jacobian");
 
 }
 
-KDL::Jacobian KUKA_CONTROL::Jacobian3(KDL::JntArray *q_in){
-
-	KDL::Jacobian Jac(_k3_chain.getNrOfJoints());
-
-	if( _J3_solver->JntToJac(*q_in, Jac) != KDL::ChainJntToJacSolver::E_NOERROR )
-		cout << "failing in Jacobian 3 computation!" << endl;
-
-	return Jac;
-
-}
+bool KUKA_CONTROL::computeJacobian(KDL::ChainJntToJacSolver& solver,const KDL::JntArray& q, KDL::Jacobian jac, Eigen::MatrixXd& out, const std::string& name)
+{	
+    if (solver.JntToJac(q, jac) != KDL::ChainJntToJacSolver::E_NOERROR) {
+        std::cout << "failing in " << name << " computation!" << std::endl;
+		return false;
+    }
+    out = jac.data;
+    return true;
+};
 
 cbf KUKA_CONTROL::cbf_goto_point(const Eigen::Vector3d &dpe){
 	
@@ -408,7 +426,7 @@ cbf KUKA_CONTROL::cbf_keep_ee_z_horizontal(){
 								          ez(0)*z(2) - ez(2)*z(0),
 										 -ez(0)*z(1) + ez(1)*z(0)).transpose()*omegaJ;
 
-	// ------------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------------
 
 	return cbfEEhor;
 }
@@ -432,7 +450,7 @@ cbf KUKA_CONTROL::cbf_keep_ee_x_horizontal(){
 								          ex(0)*x(2) - ex(2)*x(0),
 										 -ex(0)*x(1) + ex(1)*x(0)).transpose()*omegaJ;
 
-	// ------------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------------
 
 	return cbfEEhor;
 }
@@ -470,29 +488,29 @@ cbf KUKA_CONTROL::cbf_approach_grasp_plate(Affine3d plateTf, float r){
 
 	o_ez = z - z_d;
 
-	// cbfEEplate.h = -(p_plate_xy.squaredNorm() - r*r)*(p_plate_xy.squaredNorm() - r*r)
-	// 			   -(p_plate(2)*p_plate(2))*(p_plate(2)*p_plate(2))
-	// 			   -o_ey.squaredNorm()
-	// 			   -o_ez.squaredNorm(); //(z-z_d).dot((z-z_d));
+	// ------------------------------------------------------------------------------
+	cbfEEplate.h = -(p_plate_xy.norm() - r)*(p_plate_xy.norm() - r)
+				   -(p_plate(2)*p_plate(2))
+				   -o_ey.squaredNorm()
+				   -o_ez.squaredNorm(); //(z-z_d).dot((z-z_d));
 
+	cbfEEplate.dhdq = -(p_plate_xy.norm() - r)*(1/p_plate_xy.norm())*(p - plateTf.translation()).head<2>().transpose()*_J_gripper.block(0,0,2,_Nj) 
+					  -2*(p(2) -  plate_center(2))*_J_gripper.block(2,0,1,_Nj) 
+					  -2*Eigen::Vector3d(-o_ey(1)*y(2) + o_ey(2)*y(1), 
+				    				      o_ey(0)*y(2) - o_ey(2)*y(0),
+										 -o_ey(0)*y(1) + o_ey(1)*y(0)).transpose()*omegaJ
+					  -2* Eigen::Vector3d(-o_ez(1)*z(2) + o_ez(2)*z(1), 
+				     				       o_ez(0)*z(2) - o_ez(2)*z(0),
+										  -o_ez(0)*z(1) + o_ez(1)*z(0)).transpose()*omegaJ
+				      -2*(z -z_d).transpose()*P*(1/(plateTf.translation() - p).norm())*_J_gripper.block(0,0,3,_Nj); // gradient of the term (z-z_d).dot((z-z_d)) w.r.t. q								   
 	
-	// cbfEEplate.dhdq = -4*(p_plate_xy.squaredNorm() - r*r)*(p - plateTf.translation()).head<2>().transpose()*_J_gripper.block(0,0,2,_Nj) 
-	// 				  -4*(p_plate(2)*p_plate(2))*(p(2) -  plate_center(2))*_J_gripper.block(2,0,1,_Nj) 
-	// 				  -2*Eigen::Vector3d(-o_ey(1)*y(2) + o_ey(2)*y(1), 
-	// 			    				      o_ey(0)*y(2) - o_ey(2)*y(0),
-	// 									 -o_ey(0)*y(1) + o_ey(1)*y(0)).transpose()*omegaJ
-	// 				  -2* Eigen::Vector3d(-o_ez(1)*z(2) + o_ez(2)*z(1), 
-	// 			     				       o_ez(0)*z(2) - o_ez(2)*z(0),
-	// 									  -o_ez(0)*z(1) + o_ez(1)*z(0)).transpose()*omegaJ
-	// 			      -2*(z -z_d).transpose()*P*(1/(plateTf.translation() - p).norm())*_J_gripper.block(0,0,3,_Nj); // gradient of the term (z-z_d).dot((z-z_d)) w.r.t. q								   
-
-
-	// cbfEEplate.h = -(p_plate_xy.squaredNorm() - r*r)
+	// ------------------------------------------------------------------------------
+	// cbfEEplate.h = -(p_plate_xy.squaredNorm() - r*r)*(p_plate_xy.squaredNorm() - r*r)
 	// 			   -(p_plate(2)*p_plate(2))
 	// 			   -o_ey.squaredNorm()
 	// 			   -o_ez.squaredNorm(); //(z-z_d).dot((z-z_d));
 
-	// cbfEEplate.dhdq = -2*(p - plateTf.translation()).head<2>().transpose()*_J_gripper.block(0,0,2,_Nj) 
+	// cbfEEplate.dhdq = -4*(p_plate_xy.squaredNorm() - r*r)*(p - plateTf.translation()).head<2>().transpose()*_J_gripper.block(0,0,2,_Nj) 
 	// 				  -2*(p(2) -  plate_center(2))*_J_gripper.block(2,0,1,_Nj) 
 	// 				  -2*Eigen::Vector3d(-o_ey(1)*y(2) + o_ey(2)*y(1), 
 	// 			    				      o_ey(0)*y(2) - o_ey(2)*y(0),
@@ -502,30 +520,14 @@ cbf KUKA_CONTROL::cbf_approach_grasp_plate(Affine3d plateTf, float r){
 	// 									  -o_ez(0)*z(1) + o_ez(1)*z(0)).transpose()*omegaJ
 	// 			      -2*(z -z_d).transpose()*P*(1/(plateTf.translation() - p).norm())*_J_gripper.block(0,0,3,_Nj); // gradient of the term (z-z_d).dot((z-z_d)) w.r.t. q								   
 
-	// ------------------------------------------------------------------------------
-	cbfEEplate.h = -(p_plate_xy.norm() - r)*(p_plate_xy.norm() - r)
-				   -(p_plate(2)*p_plate(2))
-				   -o_ey.squaredNorm()
-				   -o_ez.squaredNorm(); //(z-z_d).dot((z-z_d));
-
-	cbfEEplate.dhdq = -4*(p_plate_xy.norm() - r)*(1/p_plate_xy.norm())*(p - plateTf.translation()).head<2>().transpose()*_J_gripper.block(0,0,2,_Nj) 
-					  -2*(p(2) -  plate_center(2))*_J_gripper.block(2,0,1,_Nj) 
-					  -2*Eigen::Vector3d(-o_ey(1)*y(2) + o_ey(2)*y(1), 
-				    				      o_ey(0)*y(2) - o_ey(2)*y(0),
-										 -o_ey(0)*y(1) + o_ey(1)*y(0)).transpose()*omegaJ
-					  -2* Eigen::Vector3d(-o_ez(1)*z(2) + o_ez(2)*z(1), 
-				     				       o_ez(0)*z(2) - o_ez(2)*z(0),
-										  -o_ez(0)*z(1) + o_ez(1)*z(0)).transpose()*omegaJ
-				      -2*(z -z_d).transpose()*P*(1/(plateTf.translation() - p).norm())*_J_gripper.block(0,0,3,_Nj); // gradient of the term (z-z_d).dot((z-z_d)) w.r.t. q								   
-
 	return cbfEEplate;
 }
 
-cbf KUKA_CONTROL::cbf_avoid_plate(Affine3d plateTf, Vector3d lengths){
+cbf KUKA_CONTROL::cbf_avoid_plate(const Affine3d linkTf, const MatrixXd J, const Affine3d plateTf, const Vector3d lengths){
 
 	cbf cbf_avoid;
 	cbf_avoid.dhdq.resize(_Nj);
-	Vector3d p(_T_gripper.p.x(), _T_gripper.p.y(), _T_gripper.p.z());
+	Vector3d p(linkTf.translation().x(), linkTf.translation().y(), linkTf.translation().z());
 
 	Eigen::Vector3d p_plate = plateTf.inverse() * p;
 	Eigen::Vector3d center = plateTf.translation();
@@ -539,7 +541,7 @@ cbf KUKA_CONTROL::cbf_avoid_plate(Affine3d plateTf, Vector3d lengths){
 	cbf_avoid.h = (d2_scaled - 1.0);
 	
 	// Jacobian computation: dh/dq
-	Eigen::MatrixXd Jg = _J_gripper.block(0,0,3,_Nj);
+	Eigen::MatrixXd Jg = J.block(0,0,3,_Nj);
 	
 	cbf_avoid.dhdq = 2*(p - center).transpose()*plateTf.rotation().transpose()* L2 * Jg;
 
@@ -629,9 +631,11 @@ void KUKA_CONTROL::cbf_joint_limits(vector<cbf> &cbfjl){
 
 void KUKA_CONTROL::task_set_input(){
 	int i=0;
-
+	ros::Rate r(1/dt);
+	
 	while(ros::ok()){
-		if( scanf("%d",&i) ) _taskSet = i;
+		//grasp_sm(_taskSet);
+		if(scanf("%d",&i)) _taskSet = i;
 	}
 }
 
@@ -666,6 +670,86 @@ void KUKA_CONTROL::solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, i
 	#endif
 }
 
+bool KUKA_CONTROL::request_attach_plate(){
+
+  	ros::ServiceClient attach_client = _nh.serviceClient<boeing_gazebo_model_attachment_plugin::Attach>("/gazebo/attach");
+
+	attach_client.waitForExistence();
+
+	boeing_gazebo_model_attachment_plugin::Attach srv;
+	srv.request.model_name_1 = "iiwa";
+	srv.request.link_name_1  = "wsg_50_gripper_right";
+	srv.request.model_name_2 = "plate";
+	srv.request.link_name_2  = "plate_grasp_link";
+
+	if (attach_client.call(srv))
+		ROS_INFO("Attach call sent successfully.");
+	else
+		ROS_ERROR("Failed to call /gazebo/attach");
+
+	return srv.response.success;
+}
+
+void KUKA_CONTROL::grasp_sm(int &taskSet){
+
+	Eigen::Affine3d plateTf = Eigen::Affine3d::Identity();
+	plateTf.translate(_plate_position);  
+	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(0), Eigen::Vector3d::UnitX()));
+	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(1), Eigen::Vector3d::UnitY()));
+	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(2), Eigen::Vector3d::UnitZ()));
+
+	cbf cbf_approach = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.025);
+	cbf cbf_grasp = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.08);
+	cbf cbf_go2p1 = cbf_goto_point(_p1);
+	cbf cbf_go2p2 = cbf_goto_point(_p2);
+
+
+	switch(_state){
+		case 0: {
+			ROS_INFO("Approaching plate...");
+			taskSet = 6;
+			if(cbf_approach.h > -0.01){
+				_state = 1;
+			}
+		}break;
+		case 1: {
+			ROS_INFO("Grasping plate...");
+			taskSet = 7;
+			if(cbf_grasp.h > -0.008){
+				_state = 2;
+			}
+		}break;
+		case 2: {
+			taskSet = 7;
+			if(request_attach_plate()){
+				ROS_INFO("Attach!");
+				_state = 3;
+			}
+		}break;
+		case 3: {
+			ROS_INFO( "Moving to P1!");
+			taskSet = 1; 
+			if(cbf_go2p1.h > -0.015){
+				ROS_INFO( "Target point P1 reached, moving to P2!");
+				_state = 4;
+			}
+		}break;
+		case 4: {
+			ROS_INFO( "Moving to P2!");
+			taskSet = 5; 
+			if(cbf_go2p2.h > -0.015){
+				ROS_INFO( "Target point P2 reached!");
+				_state = 5;
+			}
+		}break;
+		case 5: {
+			ROS_INFO( "Task completed!");
+			taskSet = 5;
+		}break;
+	}
+
+}
+
 void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float64MultiArray & h){
 	
 	cbf c0;
@@ -685,14 +769,18 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(0), Eigen::Vector3d::UnitX()));
 	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(1), Eigen::Vector3d::UnitY()));
 	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(2), Eigen::Vector3d::UnitZ()));
-	c0 = cbf_avoid_plate(plateTf, Eigen::Vector3d(1.2*_plate_radius, 1.2*_plate_radius, 1.2*0.01));
+
+	Affine3d _Tf_gripper_lf = kdlFrameToEigenAffine(_T_gripper_lf);
+	Affine3d _Tf_gripper_rf = kdlFrameToEigenAffine(_T_gripper_rf);
+
+	c0 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius, 1.0*0.01));
 	cbfs.push_back(c0);
+
 
 	switch(taskSet){
 		case 1:    //  eePoint < eeHoriz  //  eePoint < vision   
 		{	
-			Eigen::Vector3d dpe(0.3, 0.2, 0.8);
-			c1 = cbf_goto_point(dpe);
+			c1 = cbf_goto_point(_p1);
 			c2 = cbf_keep_ee_x_horizontal();//cbf_vision();
 			c3.h = 0;
 			c3.dhdq.resize(_Nj);
@@ -707,8 +795,7 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 		}break;
 		case 2:   //  eePoint < 3linkz < vision
 		{
-			Eigen::Vector3d dpe(0.3, 0.2, 0.8);
-			c1 = cbf_goto_point(dpe);
+			c1 = cbf_goto_point(_p1);
 			c2 = cbf_goto_z_3link(0.45);
 			c3 = cbf_vision();
 			cbfs.push_back(c1);
@@ -721,11 +808,9 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 		}break;
 		case 3:   //  eePoint1 < eePoint2 < vision
 		{
-			Eigen::Vector3d dpe(0.3, 0.2, 0.8);
-			Eigen::Vector3d dpe2(0.3, -0.2, 0.7);
-			c1 = cbf_goto_point(dpe);
-			c2 = cbf_goto_point(dpe2);
-			c3 = cbf_vision();
+			c1 = cbf_goto_point(_p1);
+			c2 = cbf_goto_point(_p2);
+			c3 = cbf_keep_ee_x_horizontal();
 			cbfs.push_back(c1);
 			cbfs.push_back(c2);
 			cbfs.push_back(c3);
@@ -736,11 +821,9 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 		}break;
 		case 4:   // eePoint2 < eePoint1 < vision
 		{
-			Eigen::Vector3d dpe(0.3, 0.2, 0.8);
-			Eigen::Vector3d dpe2(0.3, -0.2, 0.7);
-			c1 = cbf_goto_point(dpe2);
-			c2 = cbf_goto_point(dpe);
-			c3 = cbf_vision();
+			c1 = cbf_goto_point(_p2);
+			c2 = cbf_goto_point(_p1);
+			c3 = cbf_keep_ee_x_horizontal();
 			cbfs.push_back(c1);
 			cbfs.push_back(c2);
 			cbfs.push_back(c3);					
@@ -751,9 +834,8 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 		}break;
 		case 5:   // eeHoriz < eePoint2
 		{
-			Eigen::Vector3d dpe2(0.8, -0.2, 0.7);
 			c1 = cbf_keep_ee_x_horizontal();
-			c2 = cbf_goto_point(dpe2);
+			c2 = cbf_goto_point(_p2);
 			c3.h = 0;
 			c3.dhdq.resize(_Nj);
 			c3.dhdq.setZero();
@@ -786,13 +868,11 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 		}break;
 		case 7:
 		{
-			Eigen::Vector3d dpe(0.8, 0.1, 0.7);
-				
-			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.02);
+			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.08);
 			c2.h = 0;
 			c2.dhdq.resize(_Nj);
 			c2.dhdq.setZero();
-			//c2 = cbf_goto_point(dpe);
+			c2 = cbf_goto_point(_p2);
 			c3.h = 0;
 			c3.dhdq.resize(_Nj);
 			c3.dhdq.setZero();
@@ -827,11 +907,12 @@ void KUKA_CONTROL::ctrl_loop(){
 	vector<std_msgs::Float64> jcmd;
 	vector<std_msgs::Float64> vcmd;
 	std_msgs::Float64MultiArray jv_command;
-	std_msgs::Float64MultiArray u_in;
-	u_in.data.resize(7);
+	std_msgs::Float64MultiArray jp_command;
+
 	jcmd.resize(7);
 	vcmd.resize(7);
   	jv_command.data.resize(14);
+	jp_command.data.resize(14);
 	
 	while(!_first_js){
 		ros::spinOnce();
@@ -840,6 +921,7 @@ void KUKA_CONTROL::ctrl_loop(){
 
 	//Init q
 	_q = _qfb;
+	
 
 	double mean_st = 0;
 	int iter = 0;
@@ -865,7 +947,6 @@ void KUKA_CONTROL::ctrl_loop(){
 
 
 	// Initialize solvers
-
 	if(!initQP(_solver,_lu, _ldelta, _gamma, cbfs)){
 		ROS_ERROR("Problem init failed");
 		exit(1);
@@ -879,9 +960,9 @@ void KUKA_CONTROL::ctrl_loop(){
 	while( ros::ok() ) {
 
 		_q = _qfb;                                    
-
-		update_dirkin(_qfb);
-
+		_q = qd;
+		update_dirkin(_q);
+		
 
 		if(_taskSet != 0){
 			prvtaskSet = taskSet;
@@ -890,23 +971,12 @@ void KUKA_CONTROL::ctrl_loop(){
 			sigma = 0;
 			stackChanged = true;		
 		}
-
-
-		// if((iter == 1500 || iter == 11500|| iter == 21500 || iter == 28500) && !stackChanged){
-		// 	prvtaskSet = taskSet;
-		// 	taskSet++;
-		// 	sigma = 0;
-		// 	stackChanged = true;
-		// }
+		grasp_sm(taskSet);
 		
 		taskstack(prvtaskSet,cbfs_old,h);
 		taskstack(taskSet,cbfs,h);
  
 //************************************************************************
-
-	// Eigen::Matrix<c_float, -1, 1> usol;
-	// Eigen::Matrix<c_float, -1, 1> usolprv;
-		
 		if(stackChanged){
 
 			solveQP(_solverprv, cbfs_old, prvtaskSet, u1);
@@ -923,16 +993,19 @@ void KUKA_CONTROL::ctrl_loop(){
 		}
 		if(sigma == 1) stackChanged = false;
 //************************************************************************
+
+		
 		for(int k=0; k <_Nj; k++){
-			u_in.data[k] = u(k);
+
+			//// Velocity commands
+			// vcmd[k].data = u(k);
+
+			// if(taskSet == 10){
+			// 	ROS_INFO("Home position");
+			// 	vcmd[k].data = -_kp*_qfb[k];
+			// }
 			
-			vcmd[k].data = u(k);
-			if(taskSet == 10){
-				ROS_INFO("Home position");
-				vcmd[k].data = -_kp*_qfb[k];
-			}
-			//vcmd[k].data = u(k);
-			_j_pub[k].publish(vcmd[k]);
+			// _j_pub[k].publish(vcmd[k]);
 			jv_command.data[k] = qd[k];
 			jv_command.data[7+k] = u(k);
 		}
@@ -940,6 +1013,18 @@ void KUKA_CONTROL::ctrl_loop(){
 		//Update qd
 
 		qd = qd + u*dt;  
+
+		// Position commands
+		for(int k=0; k <_Nj; k++){
+	
+			jcmd[k].data = qd(k);
+			if(taskSet == 10){
+				ROS_INFO("Home position");
+				jcmd[k].data = 0;
+			}
+			_j_pub[k].publish(jcmd[k]);
+		}
+
 
 		_h_pub.publish(h);
 		_jv_pub.publish(jv_command);
@@ -970,10 +1055,7 @@ void KUKA_CONTROL::ctrl_loop(){
 
 KUKA_CONTROL::~KUKA_CONTROL(){
 	delete []	_q_in;
-	delete []	_dq_in;
-
 	delete []	_q_3in;
-	delete []	_dq_3in;
 
 	delete []	_fksolver;
 	delete []	_fk3solver;
@@ -982,6 +1064,10 @@ KUKA_CONTROL::~KUKA_CONTROL(){
 	delete []	_J_solver;
 	delete []	_J3_solver;
 	delete []	_J_gripper_solver;
+	delete []	_J_gripper_lf_solver;
+	delete []	_J_gripper_rf_solver;
+	delete []	_q_gripper;
+	delete []	_dyn_param;
 
 	_outFile.close();
 }

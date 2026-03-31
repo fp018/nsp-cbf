@@ -9,7 +9,7 @@ project(iiwa_qp)
 ## is used, also find other catkin packages
 
 add_compile_options(-std=c++11)
-find_package( Eigen3 REQUIRED )
+find_package(Eigen3 REQUIRED )
 include_directories(${EIGEN3_INCLUDE_DIR})
 find_package(orocos_kdl REQUIRED)
 
@@ -33,6 +33,7 @@ find_package(catkin REQUIRED COMPONENTS
   eigen_conversions
   kdl_parser
   OsqpEigen
+  boeing_gazebo_model_attachment_plugin
 )
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}")

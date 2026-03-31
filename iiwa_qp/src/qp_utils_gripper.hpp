@@ -215,26 +215,42 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
 
   Eigen::MatrixXd N(7,7);
   N.setIdentity();
+  bool stop_proj = false;
+
   // Soft task constraints
   for(int i=0; i < 3; i++){
     Eigen::VectorXd task_gradient = cbfs[i+8].dhdq;
     Eigen::VectorXd task_gradient_proj = task_gradient.transpose()*N;
 
-    H_s.insert(i+7,i+7) = 1.0/(1.0/ld+task_gradient_proj.squaredNorm()-task_gradient_proj.transpose()*N*task_gradient_proj);
-   
-    if(task_gradient.norm()> 0){
+    //H_s.insert(i+7,i+7) = 1.0/(1.0/ld+task_gradient_proj.squaredNorm()-task_gradient_proj.transpose()*N*task_gradient_proj);
+
+    // if(task_gradient.norm() > 1e-2 && !stop_proj){
+    //   N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
+    //   // Eigen::MatrixXd pinv = (task_gradient.transpose()*N).completeOrthogonalDecomposition().pseudoInverse();
+    //   // N = N - pinv*(task_gradient.transpose()*N);
+    // }else{
+    //   N.setZero();
+    //   stop_proj = true;
+    // }
+    
+    if(task_gradient.norm() > 0){
       N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
-   
-      // std::cout <<"N: \n"<< N <<std::endl;
     }
-   // H_s.insert(i+7,i+7) = ld;
+    // std::cout << "Task " << i << " gradient norm: " << task_gradient.norm() << std::endl;
+    // if(task_gradient.norm() > 1e-2 && !stop_proj){
+    //   N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
+    // }else{
+    //   N.setZero();
+    //   stop_proj = true;
+    // }
+
+    H_s.insert(i+7,i+7) = ld;
     
     for(int j=0; j<7; j++){
       A_s.insert(i+15,j) =  -task_gradient_proj(j);
     }
     A_s.insert(i+15,i+7) = -1;
   }
-
 
   
   Eigen::Matrix<c_float, 7, 1> u_lowerBound; 
@@ -260,4 +276,20 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
   if(!solver.updateLinearConstraintsMatrix(A_s)) return false;
   if(!solver.updateBounds(lowerBound, upperBound)) return false;
   return true;
+}
+
+
+
+Eigen::Affine3d kdlFrameToEigenAffine(const KDL::Frame& f)
+{
+    Eigen::Affine3d T = Eigen::Affine3d::Identity();
+
+    T.translation() << f.p.x(), f.p.y(), f.p.z();
+
+    T.linear() <<
+        f.M(0,0), f.M(0,1), f.M(0,2),
+        f.M(1,0), f.M(1,1), f.M(1,2),
+        f.M(2,0), f.M(2,1), f.M(2,2);
+
+    return T;
 }

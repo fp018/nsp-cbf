@@ -33,18 +33,18 @@ tmux kill-session
 To attach an object to the robot, run the following command in a terminal:
 
 ```bash
-rosservice call /gazebo/attach "{model_name_1: 'iiwa', link_name_1: 'wsg_50_gripper_right', model_name_2: 'grasp_plate', link_name_2: 'plate_grasp_link'}"
+rosservice call /gazebo/attach "{model_name_1: 'iiwa', link_name_1: 'wsg_50_gripper_right', model_name_2: 'plate', link_name_2: 'plate_grasp_link'}"
 ``` 
 ```bash
 rosservice call /gazebo/attach "model_name_1: 'iiwa'
 link_name_1: 'wsg_50_gripper_right'
-model_name_2: 'grasp_plate'
+model_name_2: 'plate'
 link_name_2: 'plate_grasp_link'"
 ``` 
 To detach an object from the robot, run the following command in a terminal:
 
 ```bash
-rosservice call /gazebo/detach "{model_name_1: 'iiwa', link_name_1: 'wsg_50_gripper_left', model_name_2: 'grasp_plate', link_name_2: 'plate_link'}"
+rosservice call /gazebo/detach "{model_name_1: 'iiwa', link_name_1: 'wsg_50_gripper_left', model_name_2: 'plate', link_name_2: 'plate_link'}"
 ```
 
 # References

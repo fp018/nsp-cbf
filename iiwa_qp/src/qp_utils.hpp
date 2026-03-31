@@ -194,22 +194,27 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
 
   Eigen::MatrixXd N(7,7);
   N.setIdentity();
-
+  bool stop_proj = false;
   // Update task constraints
 
   for(int i=0; i < 3; i++){
     Eigen::VectorXd task_gradient = cbfs[i+7].dhdq;
     Eigen::VectorXd task_gradient_proj = task_gradient.transpose()*N;
 
-    //H_s.insert(i+7,i+7) = (1.0/ld+task_gradient_proj.squaredNorm()-task_gradient_proj.transpose()*N*task_gradient_proj);
-   
-    if(task_gradient.norm() > 0){
+    H_s.insert(i+7,i+7) = 1.0/(1.0/ld+task_gradient_proj.squaredNorm()-task_gradient_proj.transpose()*N*task_gradient_proj);
+    
+    std::cout << "Task " << i << " gradient norm: " << task_gradient.norm() << std::endl;
+    if(task_gradient.norm() > 1e-4 && !stop_proj ){
       N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
-   
+      
       // std::cout <<"N: \n"<< N <<std::endl;
+    }else{
+      N.setZero();
+      stop_proj = true;
+      std::cout << "Task gradient norm is zero, skipping projection update." << std::endl;
     }
     
-    H_s.insert(i+7,i+7) = ld;
+    //H_s.insert(i+7,i+7) = ld;
     
     for(int j=0; j<7; j++){
       A_s.insert(i+14,j) = -task_gradient_proj(j);
