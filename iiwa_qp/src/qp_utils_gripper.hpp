@@ -23,7 +23,7 @@ inline Eigen::SparseMatrix<c_float> dense2sparse(Eigen::MatrixXd& A ){
 }
 
 
-inline Eigen::MatrixXd pinv(const Eigen::MatrixXd &vector, double tolerance =0  ){
+inline Eigen::MatrixXd pinv(const Eigen::MatrixXd &vector, double tolerance=0){
     
   // Perform Singular Value Decomposition (SVD) on the vector 
   Eigen::BDCSVD<Eigen::MatrixXd> svd(vector, Eigen::ComputeThinU | Eigen::ComputeThinV);
@@ -65,7 +65,7 @@ inline bool initQP(OsqpEigen::Solver& solver, double lu, double ld, double gamma
 
   // Constraint matrix A
 
-  Eigen::SparseMatrix<c_float> A_s(18,10);
+  Eigen::SparseMatrix<c_float> A_s(19,10);
   // Eigen::MatrixXd A;
   // A.resize(18,12);
 
@@ -98,14 +98,15 @@ inline bool initQP(OsqpEigen::Solver& solver, double lu, double ld, double gamma
   // Hard task constraint
   for(int j=0; j<7; j++){
     A_s.insert(14,j) =  -cbfs[7].dhdq(j);
+    A_s.insert(15,j) =  -cbfs[8].dhdq(j);
   }
 
   // Soft task constraints
   for(int i=0; i < 3; i++){
     for(int j=0; j<7; j++){
-      A_s.insert(i+15,j) =  -cbfs[i+8].dhdq(j);
+      A_s.insert(i+16,j) =  -cbfs[i+9].dhdq(j);
     }
-    A_s.insert(i+15,i+7) = -1;
+    A_s.insert(i+16,i+7) = -1;
   }
 
   
@@ -122,15 +123,15 @@ inline bool initQP(OsqpEigen::Solver& solver, double lu, double ld, double gamma
   u_upperBound <<   1.2,  1.2,  1.5,  1.2,  1.5,  1.5,  1.5;
 
 
-  Eigen::Matrix<c_float, 18, 1> lowerBound;
+  Eigen::Matrix<c_float, 19, 1> lowerBound;
   lowerBound <<  u_lowerBound,
                 -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, 
                 -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, 
                 -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, 
-                -OsqpEigen::INFTY, -OsqpEigen::INFTY;
+                -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY;
 
                 
-  Eigen::Matrix<c_float, 18, 1> upperBound;
+  Eigen::Matrix<c_float, 19, 1> upperBound;
   upperBound <<     u_upperBound, 
                  gamma*cbfs[0].h, 
                  gamma*cbfs[1].h,
@@ -142,7 +143,8 @@ inline bool initQP(OsqpEigen::Solver& solver, double lu, double ld, double gamma
                  gamma*cbfs[7].h,
                  gamma*cbfs[8].h,
                  gamma*cbfs[9].h,
-                 gamma*cbfs[10].h;
+                 gamma*cbfs[10].h,
+                 gamma*cbfs[11].h;
 
   // Solver settings
 
@@ -151,7 +153,7 @@ inline bool initQP(OsqpEigen::Solver& solver, double lu, double ld, double gamma
   solver.settings()->setWarmStart(true);
   
   solver.data()->setNumberOfVariables(10);
-  solver.data()->setNumberOfConstraints(18);
+  solver.data()->setNumberOfConstraints(19);
   
 
   // set the initial data of the QP solver
@@ -173,7 +175,7 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
     H_s.insert(i,i) = lu;
   }
 
-  Eigen::SparseMatrix<c_float> A_s(18,10);
+  Eigen::SparseMatrix<c_float> A_s(19,10);
   // Eigen::MatrixXd A;
   // A.resize(18,12);
 
@@ -211,6 +213,7 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
   // Hard task constraint
   for(int j=0; j<7; j++){
     A_s.insert(14,j) =  -cbfs[7].dhdq(j);
+    A_s.insert(15,j) =  -cbfs[8].dhdq(j);
   }
 
   Eigen::MatrixXd N(7,7);
@@ -219,37 +222,41 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
 
   // Soft task constraints
   for(int i=0; i < 3; i++){
-    Eigen::VectorXd task_gradient = cbfs[i+8].dhdq;
+    Eigen::VectorXd task_gradient = cbfs[i+9].dhdq;
     Eigen::VectorXd task_gradient_proj = task_gradient.transpose()*N;
 
-    //H_s.insert(i+7,i+7) = 1.0/(1.0/ld+task_gradient_proj.squaredNorm()-task_gradient_proj.transpose()*N*task_gradient_proj);
+    H_s.insert(i+7,i+7) = 1.0/(1.0/ld+task_gradient_proj.squaredNorm()-task_gradient_proj.transpose()*N*task_gradient_proj);
 
     // if(task_gradient.norm() > 1e-2 && !stop_proj){
     //   N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
-    //   // Eigen::MatrixXd pinv = (task_gradient.transpose()*N).completeOrthogonalDecomposition().pseudoInverse();
-    //   // N = N - pinv*(task_gradient.transpose()*N);
+
     // }else{
     //   N.setZero();
     //   stop_proj = true;
     // }
     
     if(task_gradient.norm() > 0){
-      N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
+      //N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
     }
-    // std::cout << "Task " << i << " gradient norm: " << task_gradient.norm() << std::endl;
-    // if(task_gradient.norm() > 1e-2 && !stop_proj){
+
+  
+    N = N - pinv(task_gradient.transpose()*N, 1e-8)*task_gradient.transpose()*N;
+
+    //std::cout << "Task " << i << " gradient norm: " << task_gradient.norm() << std::endl;
+    // if( (task_gradient.transpose()*N*task_gradient).norm() > 1e-3 && !stop_proj){
     //   N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
     // }else{
     //   N.setZero();
     //   stop_proj = true;
     // }
 
-    H_s.insert(i+7,i+7) = ld;
+
+    //H_s.insert(i+7,i+7) = ld;
     
     for(int j=0; j<7; j++){
-      A_s.insert(i+15,j) =  -task_gradient_proj(j);
+      A_s.insert(i+16,j) =  -task_gradient_proj(j);
     }
-    A_s.insert(i+15,i+7) = -1;
+    A_s.insert(i+16,i+7) = -1;
   }
 
   
@@ -259,15 +266,15 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
   u_upperBound << 1.2,  1.2,  1.5,  1.2,  1.5,  1.5,  1.5;
 
 
-  Eigen::Matrix<c_float, 18, 1> lowerBound;
+  Eigen::Matrix<c_float, 19, 1> lowerBound;
   lowerBound <<  u_lowerBound,-OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY,
-                              -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY;
+                              -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY;
 
                 
-  Eigen::Matrix<c_float, 18, 1> upperBound;
+  Eigen::Matrix<c_float, 19, 1> upperBound;
   upperBound <<  u_upperBound, gamma*cbfs[0].h, gamma*cbfs[1].h,gamma*cbfs[2].h,gamma*cbfs[3].h,gamma*cbfs[4].h,gamma*cbfs[5].h,gamma*cbfs[6].h,
-                    gamma*cbfs[7].h,
-                    gamma*cbfs[8].h, gamma*cbfs[9].h, gamma*cbfs[10].h;
+                    1*gamma*cbfs[7].h, 1*gamma*cbfs[8].h, 
+                    gamma*cbfs[9].h, gamma*cbfs[10].h, gamma*cbfs[11].h;
   
 
   // solver.data()->clearLinearConstraintsMatrix();
