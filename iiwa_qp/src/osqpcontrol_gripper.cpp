@@ -185,7 +185,7 @@ KUKA_CONTROL::KUKA_CONTROL() {
 
 	for(int k=0; k < _Nj; k++){
 		//_j_pub[k] = _nh.advertise<std_msgs::Float64>("/kuka_iiwa/joint" + to_string(k+1) + "_velocity_controller/command", 0); //rostopic pub /kuka/task_set std_msgs/Int8 '2'
-		_j_pub[k] = _nh.advertise<std_msgs::Float64>("/kuka_iiwa/joint" + to_string(k+1) + "_position_controller/command", 0);
+		_j_pub[k] = _nh.advertise<std_msgs::Float64>("/kuka_iiwa/joint" + to_string(k+1) + "_position_controller/command", 1);
 	}
 
 	_gripper_lf_pub = _nh.advertise<std_msgs::Float64>("/kuka_iiwa/wsg_50_gl/command", 10);
@@ -197,7 +197,6 @@ KUKA_CONTROL::KUKA_CONTROL() {
 	_q_gripper_lf = new KDL::JntArray(_k_gripper_lf_chain.getNrOfJoints());
 	_q_gripper_rf = new KDL::JntArray(_k_gripper_rf_chain.getNrOfJoints());
 
-	std::cout<<"Number of joints in the gripper chain: " << _k_gripper_chain.getNrOfJoints() << std::endl;
 
 	_fksolver = new KDL::ChainFkSolverPos_recursive( _k_chain);
 	_J_solver = new KDL::ChainJntToJacSolver( _k_chain);
@@ -500,11 +499,12 @@ cbf KUKA_CONTROL::cbf_approach_grasp_plate(Affine3d plateTf, float r){
 	o_ey = y - plate_n;
 
 
-	Eigen::Matrix<double,3,3> P = Eigen::Matrix<double,3,3>::Identity(3,3) - plate_n*plate_n.transpose();
+	Eigen::Matrix<double,3,3> P = Eigen::Matrix<double,3,3>::Identity(3,3) - plate_n*plate_n.transpose()/ plate_n.squaredNorm();
 
-	Eigen::Vector3d z_d;
-	
-	z_d = P*(plateTf.translation() - p)/(plateTf.translation() - p).norm();
+	Eigen::Vector3d z_d, delta_p;
+	delta_p = plateTf.translation() - p;
+
+	z_d = P*delta_p/delta_p.norm();
 
 	o_ez = z - z_d;
 
@@ -516,14 +516,15 @@ cbf KUKA_CONTROL::cbf_approach_grasp_plate(Affine3d plateTf, float r){
 
 	cbfEEplate.dhdq = -(p_plate_xy.norm() - r)*(1/p_plate_xy.norm())*(p - plateTf.translation()).head<2>().transpose()*_J_gripper.block(0,0,2,_Nj) 
 					  -2*(p(2) -  plate_center(2))*_J_gripper.block(2,0,1,_Nj) 
-					  -2*Eigen::Vector3d(-o_ey(1)*y(2) + o_ey(2)*y(1), 
-				    				      o_ey(0)*y(2) - o_ey(2)*y(0),
-										 -o_ey(0)*y(1) + o_ey(1)*y(0)).transpose()*omegaJ
-					  -2* Eigen::Vector3d(-o_ez(1)*z(2) + o_ez(2)*z(1), 
+					  -2*Eigen::Vector3d(-o_ey(1)*y(2) + o_ey(2)*y(1), // -y z + z y
+				    				      o_ey(0)*y(2) - o_ey(2)*y(0), // x z - z x
+										 -o_ey(0)*y(1) + o_ey(1)*y(0)).transpose()*omegaJ // -x y + y x
+					  -2* Eigen::Vector3d(-o_ez(1)*z(2) + o_ez(2)*z(1),                    // gradient of the term (z-z_d).dot((z-z_d)) 
 				     				       o_ez(0)*z(2) - o_ez(2)*z(0),
 										  -o_ez(0)*z(1) + o_ez(1)*z(0)).transpose()*omegaJ
-				      -2*(z -z_d).transpose()*P*(1/(plateTf.translation() - p).norm())*_J_gripper.block(0,0,3,_Nj); // gradient of the term (z-z_d).dot((z-z_d)) w.r.t. q								   
-	
+				      -2*(z - z_d).transpose()*P*(1/delta_p.norm()) * _J_gripper.block(0,0,3,_Nj)
+					  +2*(z - z_d).transpose()*P*(delta_p*delta_p.transpose()/pow(delta_p.norm(), 3))* _J_gripper.block(0,0,3,_Nj); 
+
 	// ------------------------------------------------------------------------------
 	// cbfEEplate.h = -(p_plate_xy.squaredNorm() - r*r)*(p_plate_xy.squaredNorm() - r*r)
 	// 			   -(p_plate(2)*p_plate(2))
@@ -564,7 +565,7 @@ cbf KUKA_CONTROL::cbf_avoid_plate(const Affine3d linkTf, const MatrixXd J, const
 	// Jacobian computation: dh/dq
 	Eigen::MatrixXd Jg = J.block(0,0,3,_Nj);
 	
-	cbf_avoid.dhdq = -2*(p - center).transpose()*plateTf.rotation().transpose()* L2 *  plateTf.rotation() *Jg;
+	cbf_avoid.dhdq = 2*(p - center).transpose()*plateTf.rotation().transpose()* L2 *  plateTf.rotation() *Jg;
 
 	return cbf_avoid;
 }
@@ -677,7 +678,30 @@ void KUKA_CONTROL::solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, i
 			
 		}else{
 			usol = solver.getSolution();
+			//VectorXd lambda = solver.getDualSolution(); 
+
 			u << usol(0), usol(1), usol(2), usol(3), usol(4), usol(5), usol(6);
+			//--------------------------------------------------------------------------------------------- Closed form solution
+			// VectorXd u_1, u_2;
+			// u_1.resize(_Nj);
+			// u_1 = -(_gamma*cbfs[9].h)*cbfs[9].dhdq.transpose()/(cbfs[9].dhdq.squaredNorm() + 1/_ldelta);
+
+			// Eigen::MatrixXd N(7,7);
+			// Eigen::VectorXd task_gradient = cbfs[9].dhdq;
+
+			// N.setIdentity();
+			// if(task_gradient.squaredNorm() > 0)
+			// 	N -= task_gradient*task_gradient.transpose()/task_gradient.squaredNorm();
+			// else{
+			// 	std::cout<<"Gradient norm is too small, using 0 as null-space projection matrix"<<std::endl;
+			// 	N.setZero();
+			// }
+			// u_2 = -(_gamma*cbfs[10].h)*cbfs[10].dhdq.transpose()/(cbfs[10].dhdq.transpose()*N*cbfs[10].dhdq + 1/_ldelta);
+
+			// std::cout << "u1: " << u_1.transpose() << ", norm: "<< u_1.norm() <<std::endl;
+			// std::cout << "u2: " << u_2.transpose() << ", norm: "<< u_2.norm() <<std::endl;
+			// u = u_1 + N*u_2;
+			//--------------------------------------------------------------------------------------------- 
 		}
 		
 	}
@@ -719,31 +743,31 @@ void KUKA_CONTROL::grasp_sm(int &taskSet){
 	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(1), Eigen::Vector3d::UnitY()));
 	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(2), Eigen::Vector3d::UnitZ()));
 
-	cbf cbf_approach = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.025);
+	cbf cbf_approach = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.08);
 	cbf cbf_grasp = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.08);
 	cbf cbf_go2p1 = cbf_goto_point(_p1);
 	cbf cbf_go2p2 = cbf_goto_point(_p2);
 
 	if(!_start) return;
+	
 	switch(_state){
 		case 0: {
-			ROS_INFO("Approaching plate...");
 			taskSet = 6;
-
+			ROS_INFO("Approaching plate...");
 			std_msgs::Float64 msg;
 			msg.data = -0.5; 
 			_gripper_lf_pub.publish(msg);
 			msg.data = 0.5;
 			_gripper_rf_pub.publish(msg);
 
-			if(cbf_approach.h > -0.01){
+			if(cbf_approach.h > -0.02){
 				_state = 1;
 			}
 		}break;
 		case 1: {
 			ROS_INFO("Grasping plate...");
 			taskSet = 7;
-			if(cbf_grasp.h > -0.0015){
+			if(cbf_grasp.h > -0.0005){
 				_state = 2;
 			}
 		}break;
@@ -808,8 +832,6 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 	Affine3d _Tf_gripper_lf = kdlFrameToEigenAffine(_T_gripper_lf);
 	Affine3d _Tf_gripper_rf = kdlFrameToEigenAffine(_T_gripper_rf);
 
-
-	
 	switch(taskSet){
 		case 1:    //  eePoint < eeHoriz  //  eePoint < vision   
 		{	
@@ -867,9 +889,10 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 			cbfs.push_back(c01);
 			cbfs.push_back(c02);
 			
-			c1 = cbf_goto_point(_p2);
-			c2 = cbf_goto_point(_p1);
+			c1 = cbf_goto_point(_p1);
+			c2 = cbf_goto_point(_p2);
 			c3 = cbf_keep_ee_x_horizontal();
+
 			cbfs.push_back(c1);
 			cbfs.push_back(c2);
 			cbfs.push_back(c3);					
@@ -882,12 +905,12 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 		{	
 			cbfs.push_back(c01);
 			cbfs.push_back(c02);
-			
+
 			c1 = cbf_keep_ee_x_horizontal();
 			c2 = cbf_goto_point(_p2);
-			c3.h = 0;
-			c3.dhdq.resize(_Nj);
-			c3.dhdq.setZero();
+			c3 = cbf_goto_point(_p1);
+			// c3.dhdq.resize(_Nj);
+			// c3.dhdq.setZero();
 
 			cbfs.push_back(c1);
 			cbfs.push_back(c2);    
@@ -900,15 +923,17 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 		case 6:
 		{	
 
-			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(0.9*_plate_radius, 0.9*_plate_radius, 1.0*0.01));
-			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(0.9*_plate_radius, 0.9*_plate_radius, 1.0*0.01));
+			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius, 1.0*0.01));
+			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius, 1.0*0.01));
 			cbfs.push_back(c01);
 			cbfs.push_back(c02);
 
-			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.025);
+			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.08);
+
 			c2.h = 0;
 			c2.dhdq.resize(_Nj);
 			c2.dhdq.setZero();
+
 			c3.h = 0;
 			c3.dhdq.resize(_Nj);
 			c3.dhdq.setZero();
@@ -923,16 +948,18 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 		}break;
 		case 7:
 		{
-			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(0.9*_plate_radius, 0.9*_plate_radius, 1.0*0.01));
-			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(0.9*_plate_radius, 0.9*_plate_radius, 1.0*0.01));
+			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius, 1.0*0.01));
+			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius, 1.0*0.01));
 			cbfs.push_back(c01);
 			cbfs.push_back(c02);
 
 			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.08);
+
 			c2.h = 0;
 			c2.dhdq.resize(_Nj);
 			c2.dhdq.setZero();
 			c2 = cbf_goto_point(_p2);
+
 			c3.h = 0;
 			c3.dhdq.resize(_Nj);
 			c3.dhdq.setZero();
@@ -1072,6 +1099,7 @@ void KUKA_CONTROL::ctrl_loop(){
 			jv_command.data[7+k] = u(k);
 		}
 
+	
 		//Update qd
 
 		qd = qd + u*dt;  

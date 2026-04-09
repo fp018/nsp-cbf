@@ -155,6 +155,9 @@ inline bool initQP(OsqpEigen::Solver& solver, double lu, double ld, double gamma
   solver.data()->setNumberOfVariables(10);
   solver.data()->setNumberOfConstraints(19);
   
+  solver.settings()->setPrimalInfeasibilityTolerance(tolerance);
+  solver.settings()->setDualInfeasibilityTolerance(tolerance);
+
 
   // set the initial data of the QP solver
   if(!solver.data()->setHessianMatrix(H_s)) return false;
@@ -227,34 +230,17 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
 
     H_s.insert(i+7,i+7) = 1.0/(1.0/ld+task_gradient_proj.squaredNorm()-task_gradient_proj.transpose()*N*task_gradient_proj);
 
-    // if(task_gradient.norm() > 1e-2 && !stop_proj){
-    //   N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
-
-    // }else{
-    //   N.setZero();
-    //   stop_proj = true;
-    // }
-    
-    if(task_gradient.norm() > 0){
-      //N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
-    }
-
   
-    N = N - pinv(task_gradient.transpose()*N, 1e-8)*task_gradient.transpose()*N;
-
-    //std::cout << "Task " << i << " gradient norm: " << task_gradient.norm() << std::endl;
-    // if( (task_gradient.transpose()*N*task_gradient).norm() > 1e-3 && !stop_proj){
-    //   N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
-    // }else{
-    //   N.setZero();
-    //   stop_proj = true;
-    // }
+    //N = N - pinv(task_gradient.transpose()*N, 1e-12)*task_gradient.transpose()*N;
+    if(task_gradient.norm() > 0){
+      N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
+    }
 
 
     //H_s.insert(i+7,i+7) = ld;
     
     for(int j=0; j<7; j++){
-      A_s.insert(i+16,j) =  -task_gradient_proj(j);
+      A_s.insert(i+16,j) = -task_gradient_proj(j);
     }
     A_s.insert(i+16,i+7) = -1;
   }
@@ -273,7 +259,7 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
                 
   Eigen::Matrix<c_float, 19, 1> upperBound;
   upperBound <<  u_upperBound, gamma*cbfs[0].h, gamma*cbfs[1].h,gamma*cbfs[2].h,gamma*cbfs[3].h,gamma*cbfs[4].h,gamma*cbfs[5].h,gamma*cbfs[6].h,
-                    1*gamma*cbfs[7].h, 1*gamma*cbfs[8].h, 
+                    gamma*cbfs[7].h, gamma*cbfs[8].h, 
                     gamma*cbfs[9].h, gamma*cbfs[10].h, gamma*cbfs[11].h;
   
 
