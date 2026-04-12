@@ -78,9 +78,10 @@ inline bool initQP(OsqpEigen::Solver& solver, double lu, double ld, double gamma
   //                     0,                 0,                 0,                 0,                 0,  -cbfs[5].dhdq(5),                 0,  0,  0,  0,
   //                     0,                 0,                 0,                 0,                 0,                 0,  -cbfs[6].dhdq(6),  0,  0,  0,
   //      -cbfs[7].dhdq(0),  -cbfs[7].dhdq(1),  -cbfs[7].dhdq(2),  -cbfs[7].dhdq(3),  -cbfs[7].dhdq(4),  -cbfs[7].dhdq(5),  -cbfs[7].dhdq(6),  0,  0,  0,
-  //      -cbfs[8].dhdq(0),  -cbfs[8].dhdq(1),  -cbfs[8].dhdq(2),  -cbfs[8].dhdq(3),  -cbfs[8].dhdq(4),  -cbfs[8].dhdq(5),  -cbfs[8].dhdq(6), -1,  0,  0,
-  //      -cbfs[9].dhdq(0),  -cbfs[9].dhdq(1),  -cbfs[9].dhdq(2),  -cbfs[9].dhdq(3),  -cbfs[9].dhdq(4),  -cbfs[9].dhdq(5),  -cbfs[9].dhdq(6),  0, -1,  0,
-  //     -cbfs[10].dhdq(0), -cbfs[10].dhdq(1), -cbfs[10].dhdq(2), -cbfs[10].dhdq(3), -cbfs[10].dhdq(4), -cbfs[10].dhdq(5), -cbfs[10].dhdq(6),  0,  0, -1,
+  //      -cbfs[8].dhdq(0),  -cbfs[8].dhdq(1),  -cbfs[8].dhdq(2),  -cbfs[8].dhdq(3),  -cbfs[8].dhdq(4),  -cbfs[8].dhdq(5),  -cbfs[8].dhdq(6),  0,  0,  0,
+  //      -cbfs[9].dhdq(0),  -cbfs[9].dhdq(1),  -cbfs[9].dhdq(2),  -cbfs[9].dhdq(3),  -cbfs[9].dhdq(4),  -cbfs[9].dhdq(5),  -cbfs[9].dhdq(6), -1,  0,  0,
+  //     -cbfs[10].dhdq(0), -cbfs[10].dhdq(1), -cbfs[10].dhdq(2), -cbfs[10].dhdq(3), -cbfs[10].dhdq(4), -cbfs[10].dhdq(5), -cbfs[10].dhdq(6),  0, -1,  0,
+  //     -cbfs[11].dhdq(0), -cbfs[11].dhdq(1), -cbfs[11].dhdq(2), -cbfs[11].dhdq(3), -cbfs[11].dhdq(4), -cbfs[11].dhdq(5), -cbfs[11].dhdq(6),  0,  0, -1,
 
   // cout<<A;
   // A_s = dense2sparse(A);			
@@ -171,6 +172,51 @@ inline bool initQP(OsqpEigen::Solver& solver, double lu, double ld, double gamma
   return true;
 }
 
+inline Eigen::Vector2d computeBounds(const vector<cbf> &cbfs, double gamma, double ld){
+
+  Eigen::MatrixXd W, A, B, dhdq;
+
+  Eigen::MatrixXd N1(7,7), N2(7,7);
+
+  Eigen::VectorXd task_gradient_1 = cbfs[9].dhdq;
+  Eigen::VectorXd task_gradient_2 = cbfs[10].dhdq;
+
+  if(task_gradient_1.norm() > 0)
+    N1 = Eigen::MatrixXd::Identity(7,7) - task_gradient_1*(task_gradient_1.transpose()*task_gradient_1).inverse()*task_gradient_1.transpose();
+  else
+    N1.setIdentity();
+  
+  if(task_gradient_2.norm() > 0)
+    N2 = N1 - N1*task_gradient_2*(task_gradient_2.transpose()*N1*task_gradient_2).inverse()*task_gradient_2.transpose()*N1;
+  else
+    N2.setIdentity();
+  
+  dhdq.resize(3,7);
+  A.resize(3,7);
+
+  dhdq << cbfs[9].dhdq.transpose(),
+          cbfs[10].dhdq.transpose(),
+          cbfs[11].dhdq.transpose();
+
+  A << cbfs[9].dhdq.transpose(),
+       cbfs[10].dhdq.transpose()*N1,
+       cbfs[11].dhdq.transpose()*N2;
+  
+  W =  dhdq*A.transpose()*(Eigen::MatrixXd::Identity(3,3) + ld*A*A.transpose()).inverse();
+
+  double c1, c2, c2_lb, c3_lb;
+
+  c1 = gamma;
+  c2 = gamma;
+
+  c2_lb = std::max(0.0, c1*pow(W(1,0), 2)/(4*(W(0,0)*W(1,1))));
+
+  c3_lb = std::max(0.0, (W(0,0)*pow(W(2,1),2)*pow(c2,2) + c1*c2*pow(W(2,0),2)*W(1,1)-c1*c2*W(1,0)*W(2,0)*W(2,1))/(W(2,2)*(4*c2*W(0,0)*W(1,1)-c1*W(1,0)*W(1,0))));
+
+  return Eigen::Vector2d(c2_lb, c3_lb);
+
+}
+
 inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double gamma, double lu, double ld, int taskset){
 
   Eigen::SparseMatrix<c_float> H_s(10,10);
@@ -179,24 +225,6 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
   }
 
   Eigen::SparseMatrix<c_float> A_s(19,10);
-  // Eigen::MatrixXd A;
-  // A.resize(18,12);
-
-  // A <<  MatrixXd::Identity(7,7), MatrixXd::Zero(7, 5),
-  //       -cbfs[0].dhdq(0),                0,                0,                 0,                  0,                 0,                 0,  0,  0,  0,
-  //                     0,  -cbfs[1].dhdq(1),                0,                 0,                  0,                 0,                 0,  0,  0,  0,
-  //                     0,                 0,  -cbfs[2].dhdq(2),                0,                  0,                 0,                 0,  0,  0,  0,
-  //                     0,                 0,                 0,  -cbfs[3].dhdq(3),                 0,                 0,                 0,  0,  0,  0,
-  //                     0,                 0,                 0,                 0,  -cbfs[4].dhdq(4),                 0,                 0,  0,  0,  0,
-  //                     0,                 0,                 0,                 0,                 0,  -cbfs[5].dhdq(5),                 0,  0,  0,  0,
-  //                     0,                 0,                 0,                 0,                 0,                 0,  -cbfs[6].dhdq(6),  0,  0,  0,
-  //      -cbfs[7].dhdq(0),  -cbfs[7].dhdq(1),  -cbfs[7].dhdq(2),  -cbfs[7].dhdq(3),  -cbfs[7].dhdq(4),  -cbfs[7].dhdq(5),  -cbfs[7].dhdq(6),  0,  0,  0,
-  //      -cbfs[8].dhdq(0),  -cbfs[8].dhdq(1),  -cbfs[8].dhdq(2),  -cbfs[8].dhdq(3),  -cbfs[8].dhdq(4),  -cbfs[8].dhdq(5),  -cbfs[8].dhdq(6), -1,  0,  0,
-  //      -cbfs[9].dhdq(0),  -cbfs[9].dhdq(1),  -cbfs[9].dhdq(2),  -cbfs[9].dhdq(3),  -cbfs[9].dhdq(4),  -cbfs[9].dhdq(5),  -cbfs[9].dhdq(6),  0, -1,  0,
-  //     -cbfs[10].dhdq(0), -cbfs[10].dhdq(1), -cbfs[10].dhdq(2), -cbfs[10].dhdq(3), -cbfs[10].dhdq(4), -cbfs[10].dhdq(5), -cbfs[10].dhdq(6),  0,  0, -1,
-  
-  // A_s = dense2sparse(A);	
-
 
   // Input bounds
   
@@ -230,12 +258,12 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
 
     H_s.insert(i+7,i+7) = 1.0/(1.0/ld+task_gradient_proj.squaredNorm()-task_gradient_proj.transpose()*N*task_gradient_proj);
 
-  
-    //N = N - pinv(task_gradient.transpose()*N, 1e-12)*task_gradient.transpose()*N;
+
     if(task_gradient.norm() > 0){
       N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
+        
+      //N = N - pinv(task_gradient.transpose()*N)*task_gradient.transpose()*N;
     }
-
 
     //H_s.insert(i+7,i+7) = ld;
     
@@ -256,7 +284,9 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
   lowerBound <<  u_lowerBound,-OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY,
                               -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY;
 
-                
+  // Eigen::Vector2d bounds = computeBounds(cbfs, gamma, ld);
+  // double gain2 = std::max(gamma, bounds(0));
+
   Eigen::Matrix<c_float, 19, 1> upperBound;
   upperBound <<  u_upperBound, gamma*cbfs[0].h, gamma*cbfs[1].h,gamma*cbfs[2].h,gamma*cbfs[3].h,gamma*cbfs[4].h,gamma*cbfs[5].h,gamma*cbfs[6].h,
                     gamma*cbfs[7].h, gamma*cbfs[8].h, 

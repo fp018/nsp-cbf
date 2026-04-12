@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- <node name="iiwa_qp_controller" pkg="iiwa_qp" type="iiwa_qp_controller" /> -->
+    <include file="$(find kuka_iiwa_support)/launch/gazebo_vel_ctrl_gripper.launch"> </include>
+
+    <rosparam file="$(find iiwa_qp)/conf/set_qp.yaml" command="load"/>
+
+</launch>
+
+
+    <!-- <param name="plate_description"
+           command="$(find xacro)/xacro $(find kuka_iiwa_support)/urdf/plate.xacro"/>
+
+<node name="plate_spawner"
+         pkg="iiwa_qp"
+         type="spawn_plate.py"
+         respawn="false"
+         output="screen"/> -->

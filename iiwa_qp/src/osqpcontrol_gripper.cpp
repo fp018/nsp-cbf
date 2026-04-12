@@ -743,8 +743,8 @@ void KUKA_CONTROL::grasp_sm(int &taskSet){
 	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(1), Eigen::Vector3d::UnitY()));
 	plateTf.rotate(Eigen::AngleAxisd(_plate_rpy(2), Eigen::Vector3d::UnitZ()));
 
-	cbf cbf_approach = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.08);
-	cbf cbf_grasp = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.08);
+	cbf cbf_approach = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.1);
+	cbf cbf_grasp = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.07);
 	cbf cbf_go2p1 = cbf_goto_point(_p1);
 	cbf cbf_go2p2 = cbf_goto_point(_p2);
 
@@ -767,7 +767,7 @@ void KUKA_CONTROL::grasp_sm(int &taskSet){
 		case 1: {
 			ROS_INFO("Grasping plate...");
 			taskSet = 7;
-			if(cbf_grasp.h > -0.0005){
+			if(cbf_grasp.h > -0.005){
 				_state = 2;
 			}
 		}break;
@@ -784,7 +784,7 @@ void KUKA_CONTROL::grasp_sm(int &taskSet){
 		}break;
 		case 3: {
 			ROS_INFO( "Moving to P1!");
-			taskSet = 1; 
+			taskSet = 3; 
 			if(cbf_go2p1.h > -0.015){
 				ROS_INFO( "Target point P1 reached, moving to P2!");
 				_state = 4;
@@ -847,9 +847,11 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 			cbfs.push_back(c2);    
 			cbfs.push_back(c3);  
 			
-			h.data[0] = c1.h;
-			h.data[1] = c2.h;
-			h.data[2] = c3.h;
+			h.data[0] = c01.h;
+			h.data[1] = c02.h;
+			h.data[2] = c1.h;
+			h.data[3] = c2.h;
+			h.data[4] = c3.h;
 		}break;
 		case 2:   //  eePoint < 3linkz < vision
 		{
@@ -864,9 +866,11 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 			cbfs.push_back(c2);
 			cbfs.push_back(c3);
 
-			h.data[0] = c1.h;
-			h.data[1] = c2.h;
-			h.data[2] = c3.h;
+			h.data[0] = c01.h;
+			h.data[1] = c02.h;
+			h.data[2] = c1.h;
+			h.data[3] = c2.h;
+			h.data[4] = c3.h;
 		}break;
 		case 3:   //  eePoint1 < eePoint2 < vision
 		{
@@ -874,15 +878,18 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 			cbfs.push_back(c02);
 
 			c1 = cbf_goto_point(_p1);
-			c2 = cbf_goto_point(_p2);
-			c3 = cbf_keep_ee_x_horizontal();
+			c2 = cbf_keep_ee_x_horizontal();
+			c3 = cbf_goto_point(_p2);
+			
 			cbfs.push_back(c1);
 			cbfs.push_back(c2);
 			cbfs.push_back(c3);
 
-			h.data[0] = c1.h;
-			h.data[1] = c2.h;
-			h.data[2] = c3.h;
+			h.data[0] = c01.h;
+			h.data[1] = c02.h;
+			h.data[2] = c1.h;
+			h.data[3] = c2.h;
+			h.data[4] = c3.h;
 		}break;
 		case 4:   // eePoint2 < eePoint1 < vision
 		{
@@ -897,9 +904,11 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 			cbfs.push_back(c2);
 			cbfs.push_back(c3);					
 
-			h.data[0] = c1.h;
-			h.data[1] = c2.h;
-			h.data[2] = c3.h;
+			h.data[0] = c01.h;
+			h.data[1] = c02.h;
+			h.data[2] = c1.h;
+			h.data[3] = c2.h;
+			h.data[4] = c3.h;
 		}break;
 		case 5:   // eeHoriz < eePoint2
 		{	
@@ -916,19 +925,21 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 			cbfs.push_back(c2);    
 			cbfs.push_back(c3);  
 			
-			h.data[0] = c1.h;
-			h.data[1] = c2.h;
-			h.data[2] = c3.h;
+			h.data[0] = c01.h;
+			h.data[1] = c02.h;
+			h.data[2] = c1.h;
+			h.data[3] = c2.h;
+			h.data[4] = c3.h;
 		}break;
 		case 6:
 		{	
 
-			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius, 1.0*0.01));
-			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius, 1.0*0.01));
+			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(1.1*_plate_radius, 1.1*_plate_radius, 1.0*0.01));
+			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(1.1*_plate_radius, 1.1*_plate_radius, 1.0*0.01));
 			cbfs.push_back(c01);
 			cbfs.push_back(c02);
 
-			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.08);
+			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius + 0.1);
 
 			c2.h = 0;
 			c2.dhdq.resize(_Nj);
@@ -942,23 +953,22 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 			cbfs.push_back(c2);    
 			cbfs.push_back(c3);  
 			
-			h.data[0] = c1.h;
-			h.data[1] = c2.h;
-			h.data[2] = c3.h;
+			h.data[0] = c01.h;
+			h.data[1] = c02.h;
+			h.data[2] = c1.h;
+			h.data[3] = c2.h;
+			h.data[4] = c3.h;
 		}break;
 		case 7:
 		{
-			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius, 1.0*0.01));
-			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius, 1.0*0.01));
+			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(1.1*_plate_radius, 1.1*_plate_radius, 1.0*0.01));
+			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(1.1*_plate_radius, 1.1*_plate_radius, 1.0*0.01));
 			cbfs.push_back(c01);
 			cbfs.push_back(c02);
 
-			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.08);
+			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.07);
+			c2 = cbf_goto_point(_p1);
 
-			c2.h = 0;
-			c2.dhdq.resize(_Nj);
-			c2.dhdq.setZero();
-			c2 = cbf_goto_point(_p2);
 
 			c3.h = 0;
 			c3.dhdq.resize(_Nj);
@@ -968,9 +978,11 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 			cbfs.push_back(c2);    
 			cbfs.push_back(c3);  
 			
-			h.data[0] = c1.h;
-			h.data[1] = c2.h;
-			h.data[2] = c3.h;
+			h.data[0] = c01.h;
+			h.data[1] = c02.h;
+			h.data[2] = c1.h;
+			h.data[3] = c2.h;
+			h.data[4] = c3.h;
 		}break;
 		default:
 		
@@ -984,9 +996,11 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 			cbfs.push_back(c1);	
 			
 			
-			h.data[0] = 0;
-			h.data[1] = 0;
-			h.data[2] = 0;
+			h.data[0] = c01.h;
+			h.data[1] = c02.h;
+			h.data[2] = c1.h;
+			h.data[3] = c2.h;
+			h.data[4] = c3.h;
 		break;
 	}
 }
@@ -1030,8 +1044,9 @@ void KUKA_CONTROL::ctrl_loop(){
 	vector<cbf> cbfs_old = {};
   	vector<cbf> cbfs = {};
 
+	// CBFs msg for logging
 	std_msgs::Float64MultiArray h;
-	h.data.resize(4);
+	h.data.resize(8);
 	
 	taskstack(taskSet,cbfs,h);
 
@@ -1048,7 +1063,7 @@ void KUKA_CONTROL::ctrl_loop(){
 
 	while( ros::ok() ) {
 
-		_q = _qfb;                                    
+		//_q = _qfb;                                    
 		_q = qd;
 		update_dirkin(_q);
 
@@ -1084,22 +1099,24 @@ void KUKA_CONTROL::ctrl_loop(){
 		if(sigma == 1) stackChanged = false;
 //************************************************************************
 
+		// // Velocity commands
 		for(int k=0; k <_Nj; k++){
 
-			//// Velocity commands
-			// vcmd[k].data = u(k);
+			// // Velocity commands
+			//vcmd[k].data = u(k);
 
 			// if(taskSet == 10){
 			// 	ROS_INFO("Home position");
 			// 	vcmd[k].data = -_kp*_qfb[k];
 			// }
 			
-			// _j_pub[k].publish(vcmd[k]);
+			//_j_pub[k].publish(vcmd[k]);
 			jv_command.data[k] = qd[k];
 			jv_command.data[7+k] = u(k);
 		}
 
-	
+		Eigen::Vector2d bounds = computeBounds(cbfs, _gamma, _ldelta);
+		std::cout<<"Bounds: "<<bounds.transpose()<<std::endl;
 		//Update qd
 
 		qd = qd + u*dt;  
@@ -1115,7 +1132,10 @@ void KUKA_CONTROL::ctrl_loop(){
 			_j_pub[k].publish(jcmd[k]);
 		}
 
-		h.data[3] = taskSet;
+		h.data[5] = taskSet;
+		h.data[6] = bounds(0);
+		h.data[7] = bounds(1);
+
 		_h_pub.publish(h);
 		_jv_pub.publish(jv_command);
 
