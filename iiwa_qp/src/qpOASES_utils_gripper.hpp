@@ -1,4 +1,35 @@
+#include <qpOASES.hpp>
 #include <OsqpEigen/OsqpEigen.h>
+
+struct QPParams{
+    
+    // ========== Core Solver Settings ==========
+    bool verbosity = false;
+    bool warmStart = true;
+    
+    
+    // ========== Active-Set Parameters ==========
+    int maxWorkingSetRecalculations = 1000;       ///< qpOASES nWSR
+    double terminationTolerance = 1e-6;          ///< qpOASES epsilon
+    double maxCPUTime = 0;                    ///< Maximum CPU time in seconds
+    
+    qpOASES::BooleanType enableEqualities = qpOASES::BT_TRUE;    ///< Enable equality constraints
+    
+    enum mode { Default, Reliable, MPC } solverMode = Reliable; ///< Preset solver modes for different performance profiles
+
+    /**
+     * @brief Reset parameters to qpOASES-style defaults
+     */
+    void resetToDefaults() {
+        verbosity = false;
+        warmStart = true;
+        maxWorkingSetRecalculations = 100;
+        terminationTolerance = 1e-6;
+        maxCPUTime = 0;
+        enableEqualities = qpOASES::BT_FALSE;
+        solverMode = Default;
+    }
+};
 
 struct cbf{
 	double h;
@@ -49,23 +80,24 @@ inline Eigen::MatrixXd pinv(const Eigen::MatrixXd &vector, double tolerance=0){
 
 }
 
-inline bool initQP(OsqpEigen::Solver& solver, double lu, double ld, double gamma, const vector<cbf> &cbfs){
+inline bool initQP(qpOASES::SQProblem*& solver, double lu, double ld, double gamma, const vector<cbf> &cbfs){
   
   constexpr double tolerance = 1e-6;
 
-  // Hessian matrix cost function
-  Eigen::SparseMatrix<c_float> H_s(10,10);
+  // Hessian matrix cost function (dense row-major required by qpOASES)
+  Eigen::Matrix<double, 10, 10, Eigen::RowMajor> H_dense;
+  H_dense.setZero();
   for(int i=0;i<7;i++){
-    H_s.insert(i,i) = lu;
+    H_dense(i,i) = lu;
   }
-  H_s.insert(7,7) = ld;
-  H_s.insert(8,8) = ld;
-  H_s.insert(9,9) = ld;
+  H_dense(7,7) = ld;
+  H_dense(8,8) = ld;
+  H_dense(9,9) = ld;
 
 
   // Constraint matrix A
 
-  Eigen::SparseMatrix<c_float> A_s(19,10);
+  Eigen::SparseMatrix<double> A_s(19,10);
   // Eigen::MatrixXd A;
   // A.resize(18,12);
 
@@ -113,26 +145,26 @@ inline bool initQP(OsqpEigen::Solver& solver, double lu, double ld, double gamma
   
   // Gradient cost function
 
-  Eigen::Matrix<c_float, 10, 1> gradient;
+  Eigen::Matrix<double, 10, 1> gradient;
   gradient.setZero();
 
   // Constraints rhs terms / Lower and Upper Bounds;
 
-  Eigen::Matrix<c_float, 7, 1> u_lowerBound; 
-  Eigen::Matrix<c_float, 7, 1> u_upperBound;
+  Eigen::Matrix<double, 7, 1> u_lowerBound; 
+  Eigen::Matrix<double, 7, 1> u_upperBound;
   u_lowerBound <<  -1.2, -1.2, -1.5, -1.2, -1.5, -1.5, -1.5;
   u_upperBound <<   1.2,  1.2,  1.5,  1.2,  1.5,  1.5,  1.5;
 
 
-  Eigen::Matrix<c_float, 19, 1> lowerBound;
+  Eigen::Matrix<double, 19, 1> lowerBound;
   lowerBound <<  u_lowerBound,
-                -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, 
-                -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, 
-                -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, 
-                -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY;
+                -qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY, 
+                -qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY, 
+                -qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY, 
+                -qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY;
 
                 
-  Eigen::Matrix<c_float, 19, 1> upperBound;
+  Eigen::Matrix<double, 19, 1> upperBound;
   upperBound <<     u_upperBound, 
                  gamma*cbfs[0].h, 
                  gamma*cbfs[1].h,
@@ -148,26 +180,41 @@ inline bool initQP(OsqpEigen::Solver& solver, double lu, double ld, double gamma
                  gamma*cbfs[11].h;
 
   // Solver settings
+  solver = new qpOASES::SQProblem(10, 19);
 
-  solver.settings()->setVerbosity(false);
-  solver.settings()->setAlpha(1.0);
-  solver.settings()->setWarmStart(true);
-  
-  solver.data()->setNumberOfVariables(10);
-  solver.data()->setNumberOfConstraints(19);
-  
-  solver.settings()->setPrimalInfeasibilityTolerance(tolerance);
-  solver.settings()->setDualInfeasibilityTolerance(tolerance);
+  QPParams params;
+  qpOASES::Options options;
 
+  switch(params.solverMode)
+  {
+    case QPParams::Default:
+        options.setToDefault();
+        break;
+    case QPParams::Reliable:
+        options.setToReliable();
+        break;
+    case QPParams::MPC:
+        options.setToMPC();
+        break;
+  }
+  options.printLevel = params.verbosity ? qpOASES::PL_HIGH : qpOASES::PL_NONE;
+  options.terminationTolerance = params.terminationTolerance;
 
-  // set the initial data of the QP solver
-  if(!solver.data()->setHessianMatrix(H_s)) return false;
-  if(!solver.data()->setGradient(gradient)) return false;
-  if(!solver.data()->setLinearConstraintsMatrix(A_s))return false;
+  solver->setOptions(options);
 
-  if(!solver.data()->setLowerBound(lowerBound)) return false;
-  if(!solver.data()->setUpperBound(upperBound)) return false;
-  if(!solver.initSolver()) return false;
+  Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>  A_row;
+  A_row = Eigen::MatrixXd(A_s);
+
+  qpOASES::returnValue ret = solver->init(
+      H_dense.data(),
+      gradient.data(),
+      A_row.data(),
+      nullptr,              // variable lower bounds
+      nullptr,              // variable upper bounds
+      lowerBound.data(),
+      upperBound.data(),
+      params.maxWorkingSetRecalculations, 0
+  );
 
   return true;
 }
@@ -217,14 +264,15 @@ inline Eigen::Vector2d computeBounds(const vector<cbf> &cbfs, double gamma, doub
 
 }
 
-inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double gamma, double lu, double ld, int taskset){
-
-  Eigen::SparseMatrix<c_float> H_s(10,10);
+inline bool updateQP(qpOASES::SQProblem* &solver, const vector<cbf> &cbfs, double gamma, double lu, double ld, int taskset){
+ 
+  Eigen::Matrix<double, 10, 10, Eigen::RowMajor> H_dense;
+  H_dense.setZero();
   for(int i=0;i<7;i++){
-    H_s.insert(i,i) = lu;
+    H_dense(i,i) = lu;
   }
 
-  Eigen::SparseMatrix<c_float> A_s(19,10);
+  Eigen::SparseMatrix<double> A_s(19,10);
 
   // Input bounds
   
@@ -237,6 +285,7 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
   for(int i=0; i<7; i++){
     A_s.insert(7+i,i) = -cbfs[i].dhdq(i);
   }
+
 
   // Update task constraints
 
@@ -255,13 +304,13 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
     Eigen::VectorXd task_gradient = cbfs[i+9].dhdq;
     Eigen::VectorXd task_gradient_proj = task_gradient.transpose()*N;
 
-    H_s.insert(i+7,i+7) = 1.0/(1.0/ld+task_gradient_proj.squaredNorm()-task_gradient_proj.transpose()*N*task_gradient_proj);
+    H_dense(i+7,i+7) = 1.0/(1.0/ld+task_gradient_proj.squaredNorm()-task_gradient_proj.transpose()*N*task_gradient_proj);
 
 
     if(task_gradient.norm() > 0){
-      //N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
+      N = N - N*task_gradient*(task_gradient.transpose()*N*task_gradient).inverse()*task_gradient.transpose()*N;
         
-      N = N - pinv(task_gradient.transpose()*N)*task_gradient.transpose()*N;
+      //N = N - pinv(task_gradient.transpose()*N)*task_gradient.transpose()*N;
     }
 
     //H_s.insert(i+7,i+7) = ld;
@@ -273,31 +322,46 @@ inline bool updateQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, double 
   }
 
   
-  Eigen::Matrix<c_float, 7, 1> u_lowerBound; 
-  Eigen::Matrix<c_float, 7, 1> u_upperBound;
+  Eigen::Matrix<double, 7, 1> u_lowerBound; 
+  Eigen::Matrix<double, 7, 1> u_upperBound;
   u_lowerBound <<-1.2, -1.2, -1.5, -1.2, -1.5, -1.5, -1.5;
   u_upperBound << 1.2,  1.2,  1.5,  1.2,  1.5,  1.5,  1.5;
 
 
-  Eigen::Matrix<c_float, 19, 1> lowerBound;
-  lowerBound <<  u_lowerBound,-OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY,
-                              -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY, -OsqpEigen::INFTY;
+  Eigen::Matrix<double, 19, 1> lowerBound;
+  lowerBound <<  u_lowerBound,-qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY,
+                              -qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY, -qpOASES::INFTY;
 
   // Eigen::Vector2d bounds = computeBounds(cbfs, gamma, ld);
   // double gain2 = std::max(gamma, bounds(0));
 
-  Eigen::Matrix<c_float, 19, 1> upperBound;
+  Eigen::Matrix<double, 19, 1> upperBound;
   upperBound <<  u_upperBound, gamma*cbfs[0].h, gamma*cbfs[1].h,gamma*cbfs[2].h,gamma*cbfs[3].h,gamma*cbfs[4].h,gamma*cbfs[5].h,gamma*cbfs[6].h,
                     gamma*cbfs[7].h, gamma*cbfs[8].h, 
                     gamma*cbfs[9].h, gamma*cbfs[10].h, gamma*cbfs[11].h;
   
+  Eigen::VectorXd gradient;
+  gradient.resize(10);
+  gradient.setZero();
 
-  // solver.data()->clearLinearConstraintsMatrix();
-  // if(!solver.data()->setLinearConstraintsMatrix(A_s))return false;
-  if(!solver.updateHessianMatrix(H_s)) return false;
-  if(!solver.updateLinearConstraintsMatrix(A_s)) return false;
-  if(!solver.updateBounds(lowerBound, upperBound)) return false;
-  return true;
+  Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>  A_row;
+  A_row = Eigen::MatrixXd(A_s);
+ 
+  QPParams params;
+  qpOASES::int_t nWSR = params.maxWorkingSetRecalculations;
+
+  auto lastSolveStatus = solver->hotstart(
+        H_dense.data(),        // updated H (dense row-major)
+        gradient.data(),       // gradient
+        A_row.data(),          // updated constraint matrix
+        nullptr,               // variable lower bounds (unchanged)
+        nullptr,               // variable upper bounds (unchanged)
+        lowerBound.data(),     // constraint lower bounds (size 19)
+        upperBound.data(),     // constraint upper bounds (size 19)
+        nWSR
+  );
+
+  return (lastSolveStatus == qpOASES::SUCCESSFUL_RETURN);
 }
 
 

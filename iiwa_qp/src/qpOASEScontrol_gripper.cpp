@@ -30,7 +30,7 @@
 #include <numeric>
 #include <fstream> 
 #include <iomanip>
-#include "qp_utils_gripper.hpp"
+#include "qpOASES_utils_gripper.hpp"
 #include <boeing_gazebo_model_attachment_plugin/Attach.h>
 
 #define STACK 1
@@ -73,7 +73,7 @@ class KUKA_CONTROL {
 		cbf cbf_avoid_plate(const Affine3d linkTf, const MatrixXd J, const Affine3d plateTf, const Vector3d lengths);
 		void cbf_joint_limits(vector<cbf> &cbfjl);
 		void taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float64MultiArray & h);
-		void solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, int taskset, Vector7d& u);
+		void solveQP(qpOASES::SQProblem* solver, const vector<cbf> &cbfs, int taskset, Vector7d& u);
 
 	private:
 
@@ -134,8 +134,8 @@ class KUKA_CONTROL {
 		Eigen::MatrixXd _J_gripper_lf;
 		Eigen::MatrixXd _J_gripper_rf;
 
-		OsqpEigen::Solver _solver;
-		OsqpEigen::Solver _solverprv;
+		qpOASES::SQProblem* _solver; 
+		qpOASES::SQProblem* _solverprv;     
 
 		int _taskSet;
 		float _gamma;
@@ -661,49 +661,27 @@ void KUKA_CONTROL::task_set_input(){
 	}
 }
 
-void KUKA_CONTROL::solveQP(OsqpEigen::Solver& solver, const vector<cbf> &cbfs, int taskset, Vector7d& u){
+void KUKA_CONTROL::solveQP(qpOASES::SQProblem* solver, const vector<cbf> &cbfs, int taskset, Vector7d& u){
 	
 	double sec;
 	double sec2;
 	sec = ros::WallTime::now().toNSec();
 
 	if(!updateQP(solver, cbfs, _gamma, _lu, _ldelta, taskset)){
-		ROS_ERROR("Update failed");
+		ROS_ERROR("Problem solution ERROR");
 		
 	}else{
-		Eigen::Matrix<c_float, -1, 1> usol;
+		Eigen::Matrix<double, -1, 1> usol;
 		
-		if(solver.solveProblem() != OsqpEigen::ErrorExitFlag::NoError){
-			ROS_ERROR("Problem solution ERROR");
-			
-		}else{
-			usol = solver.getSolution();
-			//VectorXd lambda = solver.getDualSolution(); 
-
-			u << usol(0), usol(1), usol(2), usol(3), usol(4), usol(5), usol(6);
-			//--------------------------------------------------------------------------------------------- Closed form solution
-			// VectorXd u_1, u_2;
-			// u_1.resize(_Nj);
-			// u_1 = -(_gamma*cbfs[9].h)*cbfs[9].dhdq.transpose()/(cbfs[9].dhdq.squaredNorm() + 1/_ldelta);
-
-			// Eigen::MatrixXd N(7,7);
-			// Eigen::VectorXd task_gradient = cbfs[9].dhdq;
-
-			// N.setIdentity();
-			// if(task_gradient.squaredNorm() > 0)
-			// 	N -= task_gradient*task_gradient.transpose()/task_gradient.squaredNorm();
-			// else{
-			// 	std::cout<<"Gradient norm is too small, using 0 as null-space projection matrix"<<std::endl;
-			// 	N.setZero();
-			// }
-			// u_2 = -(_gamma*cbfs[10].h)*cbfs[10].dhdq.transpose()/(cbfs[10].dhdq.transpose()*N*cbfs[10].dhdq + 1/_ldelta);
-
-			// std::cout << "u1: " << u_1.transpose() << ", norm: "<< u_1.norm() <<std::endl;
-			// std::cout << "u2: " << u_2.transpose() << ", norm: "<< u_2.norm() <<std::endl;
-			// u = u_1 + N*u_2;
-			//--------------------------------------------------------------------------------------------- 
-		}
+		usol.resize(10);
+        qpOASES::real_t xOpt[10];
 		
+        solver->getPrimalSolution(xOpt);
+        for (int i = 0; i < 10; ++i) {
+            usol(i) = xOpt[i];
+        }
+		u << usol(0), usol(1), usol(2), usol(3), usol(4), usol(5), usol(6);
+	
 	}
 	sec2 = ros::WallTime::now().toNSec();
 	#if SOL_TIME_EVAL

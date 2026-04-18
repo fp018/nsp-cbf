@@ -13,13 +13,15 @@ find_package(Eigen3 REQUIRED )
 include_directories(${EIGEN3_INCLUDE_DIR})
 find_package(orocos_kdl REQUIRED)
 
+
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 set(CMAKE_BUILD_TYPE Release) #From terminal: catkin config -DCMAKE_BUILD_TYPE=Release (or RelWithDebInfo)
 include_directories(${catkin_INCLUDE_DIRS} )
 
 set(OsqpEigen_DIR /catkin_ws/src/osqp-eigen/bin/lib/cmake/OsqpEigen)
-
+set(qpOASES_DIR "/usr/local/lib/cmake/qpOASES" CACHE PATH "Path to qpOASESConfig.cmake")
+find_package(qpOASES REQUIRED CONFIG)
 
 find_package(catkin REQUIRED COMPONENTS
   message_generation
@@ -68,3 +70,6 @@ target_link_libraries(iiwa_control PUBLIC OsqpEigen::OsqpEigen ${catkin_LIBRARIE
 
 add_executable(iiwa_control_grip src/osqpcontrol_gripper.cpp src/lbr_iiwa_7_robot.cpp )
 target_link_libraries(iiwa_control_grip PUBLIC OsqpEigen::OsqpEigen ${catkin_LIBRARIES} ${orocos_kdl_LIBRARIES})
+
+add_executable(iiwa_control_grip_qpOASES src/qpOASEScontrol_gripper.cpp src/lbr_iiwa_7_robot.cpp )
+target_link_libraries(iiwa_control_grip_qpOASES PUBLIC OsqpEigen::OsqpEigen qpOASES ${catkin_LIBRARIES} ${orocos_kdl_LIBRARIES})
