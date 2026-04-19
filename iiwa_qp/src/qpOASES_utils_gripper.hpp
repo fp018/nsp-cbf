@@ -10,12 +10,12 @@ struct QPParams{
     
     // ========== Active-Set Parameters ==========
     int maxWorkingSetRecalculations = 1000;       ///< qpOASES nWSR
-    double terminationTolerance = 1e-6;          ///< qpOASES epsilon
+    double terminationTolerance = 1e-4;          ///< qpOASES epsilon
     double maxCPUTime = 0;                    ///< Maximum CPU time in seconds
     
     qpOASES::BooleanType enableEqualities = qpOASES::BT_TRUE;    ///< Enable equality constraints
     
-    enum mode { Default, Reliable, MPC } solverMode = Reliable; ///< Preset solver modes for different performance profiles
+    enum mode { Default, Reliable, MPC } solverMode = MPC; ///< Preset solver modes for different performance profiles
 
     /**
      * @brief Reset parameters to qpOASES-style defaults
@@ -23,7 +23,7 @@ struct QPParams{
     void resetToDefaults() {
         verbosity = false;
         warmStart = true;
-        maxWorkingSetRecalculations = 100;
+        maxWorkingSetRecalculations = 1000;
         terminationTolerance = 1e-6;
         maxCPUTime = 0;
         enableEqualities = qpOASES::BT_FALSE;
@@ -80,7 +80,7 @@ inline Eigen::MatrixXd pinv(const Eigen::MatrixXd &vector, double tolerance=0){
 
 }
 
-inline bool initQP(qpOASES::SQProblem*& solver, double lu, double ld, double gamma, const vector<cbf> &cbfs){
+inline bool initQP(qpOASES::SQProblem*& solver, double lu, double ld, std::vector<float> gamma, const vector<cbf> &cbfs){
   
   constexpr double tolerance = 1e-6;
 
@@ -166,18 +166,18 @@ inline bool initQP(qpOASES::SQProblem*& solver, double lu, double ld, double gam
                 
   Eigen::Matrix<double, 19, 1> upperBound;
   upperBound <<     u_upperBound, 
-                 gamma*cbfs[0].h, 
-                 gamma*cbfs[1].h,
-                 gamma*cbfs[2].h,
-                 gamma*cbfs[3].h,
-                 gamma*cbfs[4].h,
-                 gamma*cbfs[5].h,
-                 gamma*cbfs[6].h, 
-                 gamma*cbfs[7].h,
-                 gamma*cbfs[8].h,
-                 gamma*cbfs[9].h,
-                 gamma*cbfs[10].h,
-                 gamma*cbfs[11].h;
+                 gamma[0]*cbfs[0].h, 
+                 gamma[0]*cbfs[1].h,
+                 gamma[0]*cbfs[2].h,
+                 gamma[0]*cbfs[3].h,
+                 gamma[0]*cbfs[4].h,
+                 gamma[0]*cbfs[5].h,
+                 gamma[0]*cbfs[6].h, 
+                 gamma[0]*cbfs[7].h,
+                 gamma[0]*cbfs[8].h,
+                 gamma[1]*cbfs[9].h,
+                 gamma[1]*cbfs[10].h,
+                 gamma[1]*cbfs[11].h;
 
   // Solver settings
   solver = new qpOASES::SQProblem(10, 19);
@@ -219,7 +219,7 @@ inline bool initQP(qpOASES::SQProblem*& solver, double lu, double ld, double gam
   return true;
 }
 
-inline Eigen::Vector2d computeBounds(const vector<cbf> &cbfs, double gamma, double ld){
+inline Eigen::Vector2d computeBounds(const vector<cbf> &cbfs, std::vector<float> gamma, double ld){
 
   Eigen::MatrixXd W, A, B, dhdq;
 
@@ -253,8 +253,8 @@ inline Eigen::Vector2d computeBounds(const vector<cbf> &cbfs, double gamma, doub
 
   double c1, c2, c2_lb, c3_lb;
 
-  c1 = gamma;
-  c2 = gamma;
+  c1 = gamma[1];
+  c2 = gamma[1];
 
   c2_lb = std::max(0.0, c1*pow(W(1,0), 2)/(4*(W(0,0)*W(1,1))));
 
@@ -264,7 +264,7 @@ inline Eigen::Vector2d computeBounds(const vector<cbf> &cbfs, double gamma, doub
 
 }
 
-inline bool updateQP(qpOASES::SQProblem* &solver, const vector<cbf> &cbfs, double gamma, double lu, double ld, int taskset){
+inline bool updateQP(qpOASES::SQProblem* &solver, const vector<cbf> &cbfs, std::vector<float> gamma, double lu, double ld, int taskset){
  
   Eigen::Matrix<double, 10, 10, Eigen::RowMajor> H_dense;
   H_dense.setZero();
@@ -336,9 +336,9 @@ inline bool updateQP(qpOASES::SQProblem* &solver, const vector<cbf> &cbfs, doubl
   // double gain2 = std::max(gamma, bounds(0));
 
   Eigen::Matrix<double, 19, 1> upperBound;
-  upperBound <<  u_upperBound, gamma*cbfs[0].h, gamma*cbfs[1].h,gamma*cbfs[2].h,gamma*cbfs[3].h,gamma*cbfs[4].h,gamma*cbfs[5].h,gamma*cbfs[6].h,
-                    gamma*cbfs[7].h, gamma*cbfs[8].h, 
-                    gamma*cbfs[9].h, gamma*cbfs[10].h, gamma*cbfs[11].h;
+  upperBound <<  u_upperBound, gamma[0]*cbfs[0].h, gamma[0]*cbfs[1].h,gamma[0]*cbfs[2].h,gamma[0]*cbfs[3].h,gamma[0]*cbfs[4].h,gamma[0]*cbfs[5].h,gamma[0]*cbfs[6].h,
+                    gamma[0]*cbfs[7].h, gamma[0]*cbfs[8].h, 
+                    gamma[1]*cbfs[9].h, gamma[1]*cbfs[10].h, gamma[1]*cbfs[11].h;
   
   Eigen::VectorXd gradient;
   gradient.resize(10);

@@ -252,8 +252,8 @@ bool KUKA_CONTROL::init_model(){
 	std::string tip_link = "iiwa_link_7";
 	std::string link3 = "iiwa_link_3";
 	std::string gripper_link = "iiwa_gripper_midpoint";
-	std::string gripper_rf_link = "wsg_50_finger_right";
-	std::string gripper_lf_link = "wsg_50_finger_left";
+	std::string gripper_rf_link = "wsg_50_tip_finger_right";
+	std::string gripper_lf_link = "wsg_50_tip_finger_left";
 
 	if ( !iiwa_tree.getChain(base_link, tip_link, _k_chain) ) return false;
 	if ( !iiwa_tree.getChain(base_link, link3, _k3_chain) ) return false; 
@@ -544,32 +544,35 @@ cbf KUKA_CONTROL::cbf_approach_grasp_plate(Affine3d plateTf, float r){
 	return cbfEEplate;
 }
 
-cbf KUKA_CONTROL::cbf_avoid_plate(const Affine3d linkTf, const MatrixXd J, const Affine3d plateTf, const Vector3d lengths){
+cbf KUKA_CONTROL::cbf_avoid_plate(const Affine3d linkTf, const MatrixXd J, const Affine3d plateTf, const Vector3d lengths)
+{
+    cbf cbf_avoid;
+    cbf_avoid.dhdq.resize(_Nj);
 
-	cbf cbf_avoid;
-	cbf_avoid.dhdq.resize(_Nj);
-	Vector3d p(linkTf.translation().x(), linkTf.translation().y(), linkTf.translation().z());
+    Eigen::Vector3d p = linkTf.translation();
+    Eigen::Vector3d c = plateTf.translation();
+    Eigen::Matrix3d R = plateTf.rotation();
 
-	Eigen::Vector3d p_plate = plateTf.inverse() * p;
-	Eigen::Vector3d center = plateTf.translation();
+    // point in plate frame, centered at plate origin
+    Eigen::Vector3d plate_p = R.transpose() * (p - c);
 
-	Eigen::Vector3d inv_lengths = lengths.cwiseInverse();
-	Eigen::Vector3d inv_lengths2 = inv_lengths.cwiseProduct(inv_lengths);
-	Eigen::Matrix3d L2 = inv_lengths2.asDiagonal(); // scaling matrix for the ellipsoid axes
+    Eigen::Vector3d inv_lengths = lengths.cwiseInverse();
+    Eigen::Matrix3d L2 = inv_lengths.cwiseProduct(inv_lengths).asDiagonal();
 
-	double d2_scaled = (p - center).transpose() *plateTf.rotation().transpose()* L2 * plateTf.rotation() * (p - center);
+    // h >= 0 means outside ellipsoid
+    cbf_avoid.h = plate_p.dot(L2 * plate_p) - 1.0;
+
+    Eigen::MatrixXd Jp = J.block(0,0,3,_Nj);
+	Eigen::MatrixXd Jo = J.block(3,0,3,_Nj);
+
+
+	cbf_avoid.dhdq = 2.0 * plate_p.transpose() * L2 *(R.transpose() * Jp );
 	
-	cbf_avoid.h = (d2_scaled - 1.0);
-	if(cbf_avoid.h < 0) 
-		std::cout<<"WARN: h: "<<cbf_avoid.h<<std::endl;
-	// Jacobian computation: dh/dq
-	Eigen::MatrixXd Jg = J.block(0,0,3,_Nj);
-	
-	cbf_avoid.dhdq = 2*(p - center).transpose()*plateTf.rotation().transpose()* L2 *  plateTf.rotation() *Jg;
+	// cbf_avoid.h = (p-c).transpose()*(p-c) - (0.15*0.15); // alternative: sphere of radius 15cm around plate center
+	// cbf_avoid.dhdq = 2.0 * (p-c).transpose() * Jp;
 
-	return cbf_avoid;
+    return cbf_avoid;
 }
-
 
 cbf KUKA_CONTROL::cbf_vision(){
 

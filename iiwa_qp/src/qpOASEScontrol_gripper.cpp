@@ -138,7 +138,7 @@ class KUKA_CONTROL {
 		qpOASES::SQProblem* _solverprv;     
 
 		int _taskSet;
-		float _gamma;
+		std::vector<float> _gamma;
 		float _lu;
 		float _ldelta;
 	
@@ -252,8 +252,8 @@ bool KUKA_CONTROL::init_model(){
 	std::string tip_link = "iiwa_link_7";
 	std::string link3 = "iiwa_link_3";
 	std::string gripper_link = "iiwa_gripper_midpoint";
-	std::string gripper_rf_link = "wsg_50_finger_right";
-	std::string gripper_lf_link = "wsg_50_finger_left";
+	std::string gripper_rf_link = "wsg_50_tip_finger_right";
+	std::string gripper_lf_link = "wsg_50_tip_finger_left";
 
 	if ( !iiwa_tree.getChain(base_link, tip_link, _k_chain) ) return false;
 	if ( !iiwa_tree.getChain(base_link, link3, _k3_chain) ) return false; 
@@ -293,6 +293,9 @@ bool KUKA_CONTROL::init_model(){
 	_nh.getParam("plate_position", plate_position);
 	_nh.getParam("plate_rpy", plate_rpy);
 	_nh.getParam("plate_radius", _plate_radius);
+	std::cout << "Plate position: " << plate_position[0] << ", " << plate_position[1] << ", " << plate_position[2] << std::endl;
+	std::cout << "Plate rpy: " << plate_rpy[0] << ", " << plate_rpy[1] << ", " << plate_rpy[2] << std::endl;
+	std::cout << "Plate radius: " << _plate_radius << std::endl;
 
 	for(int i=0; i<3; i++){
 		_p1(i) = p1[i];
@@ -310,18 +313,25 @@ bool KUKA_CONTROL::init_model(){
 bool KUKA_CONTROL::set_qp(){
 
 	bool dflt = false;
+	float gamma_hard;
+	float gamma;
 
-	if(!_nh.getParam("gamma", _gamma) || !_nh.getParam("lu", _lu) ||  !_nh.getParam("ldelta", _ldelta)){
+	if(!_nh.getParam("gamma", gamma) || !_nh.getParam("gamma_hard", gamma_hard) ||  !_nh.getParam("lu", _lu) ||  !_nh.getParam("ldelta", _ldelta)){
 		ROS_WARN("Using default QP values");	
 
 		_lu = 1;
-		_gamma = 1.0;
+		_gamma.push_back(1.0);
+		_gamma.push_back(1.0);
 		_ldelta = 1000;
 
 		dflt = true;
 	}else{
+		_gamma.push_back(gamma);
+		_gamma.push_back(gamma_hard);
+
 		ROS_INFO("Parameters loaded");
-		std::cout << "gamma: " << _gamma << std::endl;
+		std::cout << "gamma: " << gamma << std::endl;
+		std::cout << "gamma_hard: " << gamma_hard << std::endl;
 		std::cout << "lu: " << _lu << std::endl;
 		std::cout << "ldelta: " << _ldelta << std::endl;
 	}
@@ -366,9 +376,6 @@ void KUKA_CONTROL::update_dirkin(Eigen::VectorXd & q_in){
 	_q_gripper_lf->data.head(7) =  q_in.head(7);
 	_q_gripper_rf->data.head(7) =  q_in.head(7);
 
-
-	// std::cout << "q gripper lf: " << _q_gripper_lf->data.transpose() << std::endl;
-	// std::cout << "q gripper rf: " << _q_gripper_rf->data.transpose() << std::endl;
 	// std::cout << "q_in: " << q_in.transpose() << std::endl;
 
 	_fksolver->JntToCart(*_q_in, _Te);
@@ -544,30 +551,34 @@ cbf KUKA_CONTROL::cbf_approach_grasp_plate(Affine3d plateTf, float r){
 	return cbfEEplate;
 }
 
-cbf KUKA_CONTROL::cbf_avoid_plate(const Affine3d linkTf, const MatrixXd J, const Affine3d plateTf, const Vector3d lengths){
+cbf KUKA_CONTROL::cbf_avoid_plate(const Affine3d linkTf, const MatrixXd J, const Affine3d plateTf, const Vector3d lengths)
+{
+    cbf cbf_avoid;
+    cbf_avoid.dhdq.resize(_Nj);
 
-	cbf cbf_avoid;
-	cbf_avoid.dhdq.resize(_Nj);
-	Vector3d p(linkTf.translation().x(), linkTf.translation().y(), linkTf.translation().z());
+    Eigen::Vector3d p = linkTf.translation();
+    Eigen::Vector3d c = plateTf.translation();
+    Eigen::Matrix3d R = plateTf.rotation();
 
-	Eigen::Vector3d p_plate = plateTf.inverse() * p;
-	Eigen::Vector3d center = plateTf.translation();
+    // point in plate frame, centered at plate origin
+    Eigen::Vector3d plate_p = R.transpose() * (p - c);
 
-	Eigen::Vector3d inv_lengths = lengths.cwiseInverse();
-	Eigen::Vector3d inv_lengths2 = inv_lengths.cwiseProduct(inv_lengths);
-	Eigen::Matrix3d L2 = inv_lengths2.asDiagonal(); // scaling matrix for the ellipsoid axes
+    Eigen::Vector3d inv_lengths = lengths.cwiseInverse();
+    Eigen::Matrix3d L2 = inv_lengths.cwiseProduct(inv_lengths).asDiagonal();
 
-	double d2_scaled = (p - center).transpose() *plateTf.rotation().transpose()* L2 * plateTf.rotation() * (p - center);
+    // h >= 0 means outside ellipsoid
+    cbf_avoid.h = plate_p.dot(L2 * plate_p) - 1.0;
+
+    Eigen::MatrixXd Jp = J.block(0,0,3,_Nj);
+	Eigen::MatrixXd Jo = J.block(3,0,3,_Nj);
+
+
+	cbf_avoid.dhdq = 2.0 * plate_p.transpose() * L2 *(R.transpose() * Jp );
 	
-	cbf_avoid.h = (d2_scaled - 1.0);
-	if(cbf_avoid.h < 0) 
-		std::cout<<"WARN: h: "<<cbf_avoid.h<<std::endl;
-	// Jacobian computation: dh/dq
-	Eigen::MatrixXd Jg = J.block(0,0,3,_Nj);
-	
-	cbf_avoid.dhdq = 2*(p - center).transpose()*plateTf.rotation().transpose()* L2 *  plateTf.rotation() *Jg;
+	// cbf_avoid.h = (p-c).transpose()*(p-c) - (0.15*0.15); // alternative: sphere of radius 15cm around plate center
+	// cbf_avoid.dhdq = 2.0 * (p-c).transpose() * Jp;
 
-	return cbf_avoid;
+    return cbf_avoid;
 }
 
 
@@ -911,9 +922,9 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 		}break;
 		case 6:
 		{	
-
-			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(1.1*_plate_radius, 1.1*_plate_radius, 1.0*0.01));
-			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(1.1*_plate_radius, 1.1*_plate_radius, 1.0*0.01));
+			
+			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius, 0.01));
+			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius, 0.01));
 			cbfs.push_back(c01);
 			cbfs.push_back(c02);
 
@@ -939,14 +950,13 @@ void KUKA_CONTROL::taskstack(int & taskSet, vector<cbf> & cbfs, std_msgs::Float6
 		}break;
 		case 7:
 		{
-			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(1.1*_plate_radius, 1.1*_plate_radius, 1.0*0.01));
-			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(1.1*_plate_radius, 1.1*_plate_radius, 1.0*0.01));
+			c01 = cbf_avoid_plate(_Tf_gripper_lf, _J_gripper_lf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius,  0.01));
+			c02 = cbf_avoid_plate(_Tf_gripper_rf, _J_gripper_rf, plateTf, Eigen::Vector3d(_plate_radius, _plate_radius,  0.01));
 			cbfs.push_back(c01);
 			cbfs.push_back(c02);
 
 			c1 = cbf_approach_grasp_plate(plateTf, _plate_radius - 0.07);
 			c2 = cbf_goto_point(_p1);
-
 
 			c3.h = 0;
 			c3.dhdq.resize(_Nj);
